@@ -6,8 +6,6 @@
 
 <p align="center"> <b>Documenting my learning journey through Java and the Spring ecosystem.</b> <br /> Conceitos, exemplos práticos e anotações organizados para evoluir continuamente como desenvolvedor. </p>
 
-<p align="center"> <a href="#-sobre-o-projeto">Sobre</a> • <a href="#-o-que-estou-estudando">Estudos</a> • <a href="#-organização">Organização</a> • <a href="#-roadmap">Roadmap</a> </p>
-
 🌱 Sobre o projeto
 
 Este repositório é meu espaço de aprendizado e consulta, onde reúno anotações, exemplos de código, conceitos importantes e boas práticas relacionadas ao desenvolvimento com Java e Spring.
