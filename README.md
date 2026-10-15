@@ -6,33 +6,33 @@
 
 <p align="center"> <b>Documenting my learning journey through Java and the Spring ecosystem.</b> <br /> Conceitos, exemplos práticos e anotações organizados para evoluir continuamente como desenvolvedor. </p>
 
+<p align="center"> <a href="https://github.com/REYezzzEnd">GitHub Profile</a> &nbsp; • &nbsp; <a href="#-sobre-o-projeto">Sobre o projeto</a> &nbsp; • &nbsp; <a href="#-o-que-estou-estudando">Estudos</a> &nbsp; • &nbsp; <a href="#-organização">Organização</a> </p>
+
 🌱 Sobre o projeto
 
 Este repositório é meu espaço de aprendizado e consulta, onde reúno anotações, exemplos de código, conceitos importantes e boas práticas relacionadas ao desenvolvimento com Java e Spring.
 
 A proposta é transformar o aprendizado em uma base de conhecimento organizada, prática e fácil de consultar, registrando minha evolução ao longo do tempo.
 
-Learn by doing. Document what matters. Keep improving.
+<p align="center"> <img src="https://img.shields.io/badge/Learn-By%20Doing-6DB33F?style=flat-square" alt="Learn by doing" /> <img src="https://img.shields.io/badge/Document-What%20Matters-8250DF?style=flat-square" alt="Document what matters" /> <img src="https://img.shields.io/badge/Keep-Improving-ED8B00?style=flat-square" alt="Keep improving" /> </p>
+
+<p align="center"> <i>Learn by doing. Document what matters. Keep improving.</i> </p>
+
 📚 O que estou estudando
 🍃 Ambiente Spring
 
 Explorando o ambiente Spring, entendendo sua organização e aprendendo a desenvolver aplicações de forma estruturada.
 
-Fundamentos e organização do ambiente Spring.
-Estrutura e fluxo de uma aplicação.
-Desenvolvimento de funcionalidades e recursos da aplicação.
-Aplicação de conceitos na prática.
+📌 Fundamentos e organização do ambiente Spring.
+🔄 Estrutura e fluxo de uma aplicação.
+⚙️ Desenvolvimento de funcionalidades e recursos da aplicação.
+🧩 Aplicação de conceitos na prática.
 ☕ Funcionalidades e recursos do Java
 
 Aprofundando os conhecimentos na linguagem Java, explorando recursos que ajudam a escrever código mais legível, expressivo e eficiente.
 
-Tema	Conteúdo
-Streams API	Processamento, filtragem, transformação e agrupamento de coleções.
-Manipulação de arquivos	Leitura, escrita e gerenciamento de arquivos e diretórios.
-Collections	Listas, conjuntos, mapas e operações com coleções.
-Programação funcional	Expressões lambda, interfaces funcionais e method references.
-Tratamento de exceções	Organização e tratamento de situações excepcionais.
-Orientação a objetos	Encapsulamento, herança, abstração e polimorfismo.
+<table> <thead> <tr> <th align="left">📖 Tema</th> <th align="left">📝 Conteúdo</th> </tr> </thead> <tbody> <tr> <td><b>Streams API</b></td> <td>Processamento, filtragem, transformação e agrupamento de coleções.</td> </tr> <tr> <td><b>Manipulação de arquivos</b></td> <td>Leitura, escrita e gerenciamento de arquivos e diretórios.</td> </tr> <tr> <td><b>Collections</b></td> <td>Listas, conjuntos, mapas e operações com coleções.</td> </tr> <tr> <td><b>Programação funcional</b></td> <td>Expressões lambda, interfaces funcionais e method references.</td> </tr> <tr> <td><b>Tratamento de exceções</b></td> <td>Organização e tratamento de situações excepcionais.</td> </tr> <tr> <td><b>Orientação a objetos</b></td> <td>Encapsulamento, herança, abstração e polimorfismo.</td> </tr> </tbody> </table>
+
 🗂️ Organização
 
 O conteúdo será organizado em diretórios temáticos, facilitando a navegação e a consulta dos assuntos estudados.
@@ -47,12 +47,15 @@ O conteúdo será organizado em diretórios temáticos, facilitando a navegaçã
  ┣ 📂 spring
  ┃ ┣ 📂 practical-examples
  ┃ ┣ 📂 dependencies
- ┃ ┗ 📂 technologies 
+ ┃ ┗ 📂 technologies
  ┗ 📜 README.md
 
+📊 GitHub Analytics
 
-<p align="center"> <img height="165" src="https://github-readme-stats.vercel.app/api?username=SEU_USUARIO&show_icons=true&theme=github_dark&hide_border=true&rank_icon=github" alt="GitHub Stats" /> <img height="165" src="https://github-readme-stats.vercel.app/api/top-langs/?username=SEU_USUARIO&layout=compact&theme=github_dark&hide_border=true" alt="Top Languages" /> </p>
+<p align="center"> <a href="https://github.com/REYezzzEnd"> <img height="180" src="https://github-readme-stats.vercel.app/api?username=REYezzzEnd&show_icons=true&theme=github_dark&hide_border=true&rank_icon=github" alt="GitHub Stats" /> </a> <a href="https://github.com/REYezzzEnd"> <img height="180" src="https://github-readme-stats.vercel.app/api/top-langs/?username=REYezzzEnd&layout=compact&theme=github_dark&hide_border=true" alt="Top Languages" /> </a> </p>
 
-<p align="center"> <img src="https://capsule-render.vercel.app/api?type=waving&color=6DB33F&height=100&section=footer" alt="Footer banner" /> </p>
+<p align="center"> <a href="https://github.com/REYezzzEnd?tab=repositories"> <img src="https://img.shields.io/badge/Explore-My%20Repositories-6DB33F?style=for-the-badge&logo=github&logoColor=white" alt="Explore my repositories" /> </a> </p>
 
-<p align="center"> <i>Built with ☕, curiosity, and consistency.</i> <br /> Learning every day. Improving one commit at a time. </p>
+<p align="center"> <img src="https://capsule-render.vercel.app/api?type=waving&color=0:6DB33F,100:173D2B&height=120&section=footer" width="100%" alt="Footer banner" /> </p>
+
+<p align="center"> <i>Built with ☕, curiosity, and consistency.</i> <br /> Learning every day. Improving one commit at a time. <br /><br /> <a href="https://github.com/REYezzzEnd"> <img src="https://img.shields.io/badge/REYezzzEnd-181717?style=flat-square&logo=github&logoColor=white" alt="REYezzzEnd on GitHub" /> </a> </p>
