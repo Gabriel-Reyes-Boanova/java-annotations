@@ -216,4 +216,81 @@ Métodos úteis retornados pela lista de violações (`ConstraintViolation`):
 
 ## Validações personalizadas
 
-*(Nota: O texto original foi interrompido aqui. Adicione nesta seção a criação de uma anotação customizada estendendo `ConstraintValidator` para fechar o conteúdo do estudo).*
+Quando as anotações nativas (como `@NotBlank` ou `@Email`) não atendem a uma regra de negócio específica — como checar se um dado já existe no banco de dados —, podemos criar nossas próprias restrições customizadas.
+
+A criação de uma validação personalizada é dividida em duas partes essenciais:
+
+### 1. A Anotação (`@interface`)
+Define onde a restrição pode ser aplicada (como em atributos), o ciclo de vida e qual classe executará a lógica de validação. Ela também configura os atributos obrigatórios exigidos pela especificação Bean Validation.
+
+```java
+package com.exemplo.validation.constraints;
+
+import jakarta.validation.Constraint;
+import jakarta.validation.Payload;
+import java.lang.annotation.*;
+
+@Target({ ElementType.FIELD }) // Define que será usada em atributos/campos
+@Retention(RetentionPolicy.RUNTIME) // Será checada em tempo de execução
+@Constraint(validatedBy = UniqueEmailValidator.class) // Aponta para a classe com a lógica
+public @interface UniqueEmail {
+    
+    // Mensagem padrão caso o desenvolvedor não defina uma no DTO
+    String message() default "Este e-mail já está cadastrado no sistema";
+
+    // Permite agrupar validações (obrigatório da especificação Bean Validation)
+    Class<?>[] groups() default {};
+
+    // Permite carregar informações extras (obrigatório da especificação)
+    Class<? extends Payload>[] payload() default {};
+}
+```
+
+### 2. O Validador (`ConstraintValidator`)
+Classe que implementa a interface `ConstraintValidator<Anotacao, TipoDoDado>` e contém a lógica de programação Java para julgar se o dado recebido é válido ou não. 
+
+Como essa classe é gerenciada como um componente do Spring Boot, é possível injetar dependências do sistema normalmente (usando `@Autowired` ou injeção via construtor) para realizar consultas em repositórios e bancos de dados.
+
+```java
+package com.exemplo.validation.constraints;
+
+import com.exemplo.validation.repository.UserRepository;
+import jakarta.validation.ConstraintValidator;
+import jakarta.validation.ConstraintValidatorContext;
+import org.springframework.beans.factory.annotation.Autowired;
+
+public class UniqueEmailValidator implements ConstraintValidator<UniqueEmail, String> {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Override
+    public boolean isValid(String email, ConstraintValidatorContext context) {
+        // Se o campo for nulo, deixamos a cargo do @NotBlank decidir se barra ou não
+        if (email == null) {
+            return true; 
+        }
+
+        // Executa a lógica de negócio: busca no banco se o e-mail já existe
+        boolean emailJaExiste = userRepository.existsByEmail(email);
+
+        // Se o e-mail já existir, a validação falha (retorna false)
+        return !emailJaExiste; 
+    }
+}
+```
+
+---
+
+### Como aplicar no seu DTO
+
+Depois de mapear a estrutura, a nova validação personalizada pode ser combinada livremente com as anotações nativas da aplicação dentro do seu Record/DTO:
+
+```java
+public record UserRequest(
+    @NotBlank(message = "O e-mail é obrigatório")
+    @Email(message = "Informe um e-mail válido")
+    @UniqueEmail // Validação personalizada em ação!
+    String email
+) {}
+```
