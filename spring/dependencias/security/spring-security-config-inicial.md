@@ -358,7 +358,21 @@ O matcher exato precisa vir **antes** do `/**`. Se a ordem for invertida, o `/**
 
 </details>
 
-### ⛓️ SecurityFilterChain
+### Outro Exemplo
+
+```java
+http.authorizeHttpRequests(auth -> auth
+        .requestMatchers("/api/auth/**", "/actuator/health").permitAll()
+        .anyRequest().authenticated())	                                              // qualquer outra rota exige login
+);
+```
+Onde o `requestMatcher` é usado sem passarmos os metodos http (**POST,GET,PUT,DELETE**) e ele passa a comportar-se como se fosse todos os metodos http neste parametro. Também
+podemos passar varios caminho para a mesma permissão, como fizemos acima 
+passando 2 caminhos em 2 parametros no mesmo metodo.
+O `.permitAll()` deixa passar **qualquer um mesmo que não esteja
+autenticado**.
+
+### SecurityFilterChain
 
 Todas essas regras ficam dentro do **`SecurityFilterChain`**, a cadeia de filtros que define as regras de autorização dos endpoints. Ele é explicado com mais detalhes no [SECURITY-RESUMO.md](SECURITY-RESUMO.md).
 
