@@ -17,7 +17,7 @@
 
 ---
 
-## 🌱 Sobre o projeto
+## Sobre o projeto
 
 Este repositório é meu espaço de aprendizado e consulta, onde reúno anotações, exemplos de código, conceitos importantes e boas práticas relacionadas ao desenvolvimento com Java e Spring.
 
@@ -33,7 +33,7 @@ A proposta é transformar o aprendizado em uma base de conhecimento organizada, 
 
 ---
 
-## 📚 O que estou estudando
+## O que estou estudando
 
 ### 🍃 Ambiente Spring
 
