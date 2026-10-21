@@ -99,10 +99,10 @@ O conteúdo será organizado em diretórios temáticos, facilitando a navegaçã
  ┃ ┣ 📂 functional-programming
  ┃ ┗ 📂 exceptions
  ┣ 📂 spring
- ┃ ┣ 📂 core-concepts
- ┃ ┣ 📂 spring-security
- ┃ ┣ 📂 spring-validation
- ┃ ┗ 📂 practical-examples
+ ┃ ┣ 📂 modelo-mvc
+ ┃ ┣ 📂 dependencias
+ ┃ ┗ 📂 requisicoes
+ ┃ 
  ┗ 📜 README.md
 ```
 
@@ -128,10 +128,6 @@ O conteúdo será organizado em diretórios temáticos, facilitando a navegaçã
 <p align="center">
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0:6DB33F,100:173D2B&height=120&section=footer" width="100%" alt="Footer banner" />
 </p>
-
-<p align="center">
-  <i>Built with ☕, curiosity, and consistency.</i> <br />
-  Learning every day. Improving one commit at a time. <br /><br />
   <a href="https://github.com/REYezzzEnd">
     <img src="https://img.shields.io/badge/REYezzzEnd-181717?style=flat-square&logo=github&logoColor=white" alt="REYezzzEnd on GitHub" />
   </a>
