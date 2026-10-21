@@ -295,6 +295,204 @@ O **status** diz ao cliente, em um número, o que aconteceu com a requisição. 
 
 ---
 
+## Controlando a resposta: @ResponseStatus e ResponseEntity
+
+Por padrão, o Spring responde `200 OK` quando o método termina sem erro. Quando você precisa de outro status, ou de cabeçalhos na resposta, existem **duas ferramentas**:
+
+| Ferramenta | O que faz | Nível de controle |
+|---|---|---|
+| `@ResponseStatus` | Define um **status fixo** por anotação | Só o status |
+| `ResponseEntity<T>` | Monta a **resposta inteira** no código | Status, cabeçalhos e corpo |
+
+### Como escolher
+
+```mermaid
+flowchart TD
+    A{O método precisa<br/>de algo diferente de 200?} -->|Não| B[Retorne o DTO direto]
+    A -->|Sim| C{Precisa de cabeçalhos<br/>ou o status muda<br/>conforme a lógica?}
+    C -->|Não| D["@ResponseStatus"]
+    C -->|Sim| E["ResponseEntity&lt;T&gt;"]
+```
+
+| | Retorno direto | `@ResponseStatus` | `ResponseEntity<T>` |
+|---|---|---|---|
+| Status | Sempre `200` | **Fixo** | **Dinâmico** |
+| Cabeçalhos (ex.: `Location`) | Não | Não | Sim |
+| Código | Mais curto | Curto | Mais verboso |
+| Ideal para | GET simples | `204` no DELETE, `201` simples | `201` com `Location`, status condicional |
+
+---
+
+### 1. `@ResponseStatus`: status fixo
+
+A anotação diz ao Spring qual status usar quando o método termina com sucesso. O corpo continua sendo o valor retornado.
+
+```java
+@DeleteMapping("/{id}")
+@ResponseStatus(HttpStatus.NO_CONTENT)      // sempre 204, sem corpo
+public void deletar(@PathVariable Long id) {
+    service.deletar(id);
+}
+
+@PostMapping
+@ResponseStatus(HttpStatus.CREATED)         // 201, com o DTO retornado no corpo
+public UsuarioResponse criar(@Valid @RequestBody UsuarioRequest request) {
+    return service.criar(request);
+}
+```
+
+Ela pode ser colocada em três lugares:
+
+| Onde | Efeito |
+|---|---|
+| **Método** | Define o status daquele endpoint |
+| **Classe do Controller** | Vale para todos os métodos que não definirem outro status |
+| **Classe de exceção** | Lançar a exceção resulta naquele status |
+
+```java
+// Em uma exceção: lançar esta classe resulta em 404
+@ResponseStatus(HttpStatus.NOT_FOUND)
+public class UsuarioNaoEncontradoException extends RuntimeException {
+    public UsuarioNaoEncontradoException(Long id) {
+        super("Não existe usuário com id " + id);
+    }
+}
+```
+
+> [!NOTE]
+> Se o método **lançar uma exceção**, o `@ResponseStatus` do método não é aplicado. O status passa a ser definido pelo [tratamento de erros](#tratamento-de-erros).
+
+> [!TIP]
+> Em exceções, o `@ResponseStatus` é um atalho simples. Com `@RestControllerAdvice` e `ProblemDetail`, o formato do erro fica padronizado e você pode incluir título e campos extras.
+
+> [!WARNING]
+> Evite o atributo `reason` (`@ResponseStatus(value = HttpStatus.NOT_FOUND, reason = "...")`). Ele faz o Spring enviar a página de erro padrão do servidor em vez do seu JSON. Para mensagens de erro, use `ProblemDetail`.
+
+---
+
+### 2. `ResponseEntity<T>`: resposta completa
+
+O `ResponseEntity<T>` representa a **resposta HTTP inteira**: **status**, **cabeçalhos** (*headers*) e **corpo** (*body*). O `<T>` é o tipo do corpo; quando não há corpo, use `ResponseEntity<Void>`.
+
+```mermaid
+flowchart LR
+    A["ResponseEntity&lt;T&gt;"] --> B[Status<br/>200, 201, 404...]
+    A --> C[Cabeçalhos<br/>Location, ETag...]
+    A --> D[Corpo<br/>objeto T em JSON]
+```
+
+#### Atalhos prontos
+
+| Atalho | Status | Uso típico |
+|---|---|---|
+| `ResponseEntity.ok(corpo)` | `200 OK` | GET, PUT com corpo |
+| `ResponseEntity.created(uri).body(corpo)` | `201 Created` | POST, com cabeçalho `Location` |
+| `ResponseEntity.accepted().build()` | `202 Accepted` | Processamento assíncrono |
+| `ResponseEntity.noContent().build()` | `204 No Content` | DELETE, PUT sem corpo |
+| `ResponseEntity.badRequest().body(corpo)` | `400 Bad Request` | Dados inválidos |
+| `ResponseEntity.notFound().build()` | `404 Not Found` | Recurso não existe |
+| `ResponseEntity.status(HttpStatus.CONFLICT).body(corpo)` | Qualquer status | `409`, `422`, etc. |
+
+> [!TIP]
+> Use `.build()` quando **não** há corpo e `.body(objeto)` quando há.
+
+#### Exemplo 1: `201 Created` com `Location`
+
+O caso mais comum. O cliente recebe o recurso criado **e** o endereço dele:
+
+```java
+@PostMapping
+public ResponseEntity<UsuarioResponse> criar(@Valid @RequestBody UsuarioRequest request) {
+    UsuarioResponse criado = service.criar(request);
+
+    URI location = ServletUriComponentsBuilder.fromCurrentRequest()
+            .path("/{id}")
+            .buildAndExpand(criado.id())
+            .toUri();                                       // http://localhost:8080/api/usuarios/6
+
+    return ResponseEntity.created(location).body(criado);   // 201 + Location + corpo
+}
+```
+
+```http
+HTTP/1.1 201 Created
+Location: http://localhost:8080/api/usuarios/6
+Content-Type: application/json
+
+{ "id": 6, "nome": "Ana", "email": "ana@email.com" }
+```
+
+> [!IMPORTANT]
+> É o exemplo em que o `@ResponseStatus(HttpStatus.CREATED)` **não basta**: ele consegue o `201`, mas não adiciona o cabeçalho `Location`.
+
+#### Exemplo 2: status decidido pela lógica
+
+O status depende do resultado: `200` se encontrou, `404` se não:
+
+```java
+@GetMapping("/{id}")
+public ResponseEntity<UsuarioResponse> buscar(@PathVariable Long id) {
+    return service.buscarOpcional(id)                              // Optional<UsuarioResponse>
+            .map(ResponseEntity::ok)                               // existe: 200 + corpo
+            .orElseGet(() -> ResponseEntity.notFound().build());   // não existe: 404
+}
+```
+
+> [!NOTE]
+> Funciona, mas na maioria dos casos é melhor o **Service lançar uma exceção** e o `@RestControllerAdvice` devolver o `404`. O Controller fica sem lógica de status e o erro segue o formato `ProblemDetail`.
+
+#### Exemplo 3: `204 No Content` em um PUT
+
+```java
+@PutMapping("/{id}")
+public ResponseEntity<Void> atualizar(@PathVariable Long id,
+                                      @Valid @RequestBody UsuarioRequest request) {
+    service.atualizar(id, request);
+    return ResponseEntity.noContent().build();   // 204, sem corpo
+}
+```
+
+#### Exemplo 4: cabeçalhos personalizados
+
+```java
+@GetMapping("/{id}/exportar")
+public ResponseEntity<byte[]> exportar(@PathVariable Long id) {
+    byte[] arquivo = service.exportar(id);
+
+    return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=usuario.csv")
+            .contentType(MediaType.parseMediaType("text/csv"))
+            .body(arquivo);                      // 200 + cabeçalhos + arquivo
+}
+```
+
+Para vários cabeçalhos de uma vez, use o `HttpHeaders`:
+
+```java
+HttpHeaders headers = new HttpHeaders();
+headers.add("X-Total-Count", String.valueOf(total));
+
+return ResponseEntity.ok().headers(headers).body(lista);
+```
+
+---
+
+### Regras para não errar
+
+> [!WARNING]
+> Não use `@ResponseStatus` e `ResponseEntity` **no mesmo método**. Se o método retorna `ResponseEntity`, o status dele **prevalece** e a anotação é ignorada, o que só gera confusão.
+
+> [!IMPORTANT]
+> Não use `ResponseEntity` em **tudo** por hábito. Se basta devolver o DTO ou usar `@ResponseStatus`, o código fica mais limpo. Reserve o `ResponseEntity` para quando você realmente precisa de cabeçalhos ou de um status dinâmico.
+
+### Resumo por operação
+
+| Operação | Opção simples | Quando precisar de mais controle |
+|---|---|---|
+| **GET** (listar/buscar) | Retorno direto (`200`) | `ResponseEntity` para `ETag` ou cabeçalhos de paginação |
+| **POST** (criar) | `@ResponseStatus(CREATED)` | `ResponseEntity.created(uri)` com `Location` (**recomendado**) |
+| **PUT** (atualizar) | Retorno direto (`200`) | `ResponseEntity.noContent()` se não devolver corpo |
+| **DELETE** (remover) | `@ResponseStatus(NO_CONTENT)` | Raramente necessário |
 ## A melhor forma de retornar dados
 
 Estas são as práticas mais atuais para o Controller devolver dados no Spring Boot moderno.
