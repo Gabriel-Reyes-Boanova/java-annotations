@@ -386,6 +386,8 @@ public interface UsuarioRepository extends JpaRepository<Usuario, Long> {
 | `And` / `Or` | `findByNomeAndAtivo(...)` | `nome = ? and ativo = ?` |
 | `Containing` | `findByNomeContaining("an")` | `nome like %an%` |
 | `StartingWith` / `EndingWith` | `findByNomeStartingWith("A")` | `nome like A%` |
+| `Equals / Is` | `findByFirstnameIs,findByFirstnameEquals` |  where x.firstname = ?1 |
+| `After / Before` | `findByStartDateAfter(Date ...)` | where x.startDate > ?1 |
 | `IgnoreCase` | `findByEmailIgnoreCase(...)` | Ignora maiúsculas e minúsculas |
 | `GreaterThan` / `LessThan` | `findByIdadeGreaterThan(18)` | `idade > 18` |
 | `Between` | `findByCriadoEmBetween(a, b)` | `criado_em between a and b` |
