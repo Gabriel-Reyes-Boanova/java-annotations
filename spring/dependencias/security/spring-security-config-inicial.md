@@ -1,4 +1,4 @@
-#  Spring Security: configuração inicial
+# 🔐 Spring Security: configuração inicial
 
 ![Java](https://img.shields.io/badge/Java-17%2B-orange?logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.x-6DB33F?logo=springboot&logoColor=white)
@@ -10,7 +10,7 @@ Uma base inicial para quem está começando no Spring Security: usuários em mem
 > [!WARNING]
 > Esta configuração é **APENAS PARA ESTUDOS**. Os usuários ficam na memória e as senhas estão sem criptografia (`{noop}`).
 
-## Sumário
+## 📑 Sumário
 
 - [Passo a passo](#-passo-a-passo)
 - [Código completo](#-código-completo)
@@ -19,20 +19,24 @@ Uma base inicial para quem está começando no Spring Security: usuários em mem
 - [InMemoryUserDetailsManager](#-inmemoryuserdetailsmanager)
 - [UserDetailsService](#-userdetailsservice)
 - [PasswordEncoder](#-passwordencoder)
+- [Restrição de rotas](#-restrição-de-rotas)
+- [Segurança por método](#-segurança-por-método)
 - [Indo para produção](#-indo-para-produção)
+- [Referências](#-referências)
 
-##  Passo a passo
+## 🪜 Passo a passo
 
 1. Crie uma pasta (pacote) chamada `security`.
 2. Dentro dela, crie a classe `DemoSecurityConfig`.
 3. Anote a classe com `@Configuration`.
 4. Crie um `@Bean` que retorna um `InMemoryUserDetailsManager` com os usuários.
 5. Crie um `@Bean` do tipo `SecurityFilterChain` para definir **quais roles acessam quais rotas**.
+6. *(Opcional)* Habilite a [segurança por método](#-segurança-por-método) com `@EnableMethodSecurity` para proteger métodos com `@PreAuthorize`.
 
 > [!IMPORTANT]
 > Os usuários (passo 4) dizem **quem** pode entrar. O `SecurityFilterChain` (passo 5) diz **o que cada um pode acessar**. Sem ele, qualquer usuário autenticado acessa qualquer rota, e as roles não servem de nada.
 
-## Código completo
+## 💻 Código completo
 
 `security/DemoSecurityConfig.java`
 
@@ -172,7 +176,7 @@ Ele também permite gerenciar usuários em tempo de execução (`createUser`, `u
 | Ótimo para estudo e testes | Não escala para vários usuários |
 | Fácil de entender | Senhas e usuários ficam no código |
 
-##  UserDetailsService
+## 🔎 UserDetailsService
 
 Interface com **um único método**, usada pelo Spring Security para buscar o usuário durante a autenticação:
 
@@ -216,7 +220,7 @@ public class UsuarioDetailsService implements UserDetailsService {
 
 </details>
 
-## PasswordEncoder
+## 🔑 PasswordEncoder
 
 Interface responsável por **codificar (hash)** e **verificar** senhas:
 
@@ -264,7 +268,6 @@ public InMemoryUserDetailsManager userDetailsManager(PasswordEncoder encoder) {
 
 > [!TIP]
 > O BCrypt gera um hash **diferente a cada chamada** (salt aleatório). Por isso a verificação é sempre feita com `matches()`, nunca com `equals()`.
-
 
 ## 🚦 Restrição de rotas
 
@@ -358,21 +361,21 @@ O matcher exato precisa vir **antes** do `/**`. Se a ordem for invertida, o `/**
 
 </details>
 
-### Outro Exemplo
+### Outro exemplo: rotas públicas
 
 ```java
 http.authorizeHttpRequests(auth -> auth
         .requestMatchers("/api/auth/**", "/actuator/health").permitAll()
-        .anyRequest().authenticated())	                                              // qualquer outra rota exige login
+        .anyRequest().authenticated()                                               // qualquer outra rota exige login
 );
 ```
-Onde o `requestMatcher` é usado sem passarmos os metodos http (**POST,GET,PUT,DELETE**) e ele passa a comportar-se como se fosse todos os metodos http neste parametro. Também
-podemos passar varios caminho para a mesma permissão, como fizemos acima 
-passando 2 caminhos em 2 parametros no mesmo metodo.
-O `.permitAll()` deixa passar **qualquer um mesmo que não esteja
-autenticado**.
 
-### SecurityFilterChain
+Aqui o `requestMatchers` é usado **sem informar o método HTTP** (`POST`, `GET`, `PUT`, `DELETE`), então a regra vale para **todos os métodos** nesses caminhos.
+Também podemos passar **vários caminhos** para a mesma permissão no mesmo `requestMatchers`, como fizemos acima com `"/api/auth/**"` e `"/actuator/health"`.
+
+O `.permitAll()` deixa passar **qualquer um, mesmo que não esteja autenticado**.
+
+### ⛓️ SecurityFilterChain
 
 Todas essas regras ficam dentro do **`SecurityFilterChain`**, a cadeia de filtros que define as regras de autorização dos endpoints. Ele é explicado com mais detalhes no [SECURITY-RESUMO.md](SECURITY-RESUMO.md).
 
@@ -414,8 +417,215 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 | `401` | Sem credenciais ou credenciais inválidas |
 | `403` | Autenticado, mas **sem a role** exigida pela rota |
 
+## 🔒 Segurança por método
+
+O `requestMatchers` protege por **URL**. Já a **segurança por método** protege o **próprio método Java** (no controller ou no service), com regras mais finas, como "só o dono do registro pode ver" ou "só pode retornar dados da própria equipe".
+
+| | `requestMatchers` (URL) | Anotações (método) |
+|---|---|---|
+| Onde fica | `SecurityFilterChain` | Em cima do método |
+| Enxerga | URL, método HTTP e role | Parâmetros, retorno e usuário logado |
+| Bom para | Regras gerais por rota | Regras detalhadas e por dono do recurso |
+
+> [!TIP]
+> Os dois se combinam: use o `requestMatchers` para as regras gerais e as anotações para o filtro fino por cima.
+
+### 🪜 Passo a passo
+
+**1. Habilite a segurança por método** na `DemoSecurityConfig`:
+
+```java
+@Configuration
+@EnableMethodSecurity
+public class DemoSecurityConfig {
+    // ...
+}
+```
+
+> [!NOTE]
+> O `@EnableMethodSecurity` substitui o antigo `@EnableGlobalMethodSecurity`, que não deve mais ser usado.
+
+**2. Anote o método** que você quer proteger:
+
+```java
+@RestController
+@RequestMapping("/api/employee")
+public class EmployeeController {
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public void delete(@PathVariable Long id) {
+        // só ADMIN executa este método
+    }
+}
+```
+
+**3. Teste com usuários diferentes.** Quem não tem a role recebe **403**.
+
+| Usuário | Resultado em `DELETE /api/employee/1` |
+|---|---|
+| Gabriel (EMPLOYEE) | `403` |
+| Vitoria (MANAGER) | `403` |
+| Grasi (ADMIN) | `200` |
+
+### 🏷️ Anotações disponíveis
+
+| Anotação | Quando executa | Para que serve | Precisa habilitar? |
+|---|---|---|---|
+| `@PreAuthorize` | **Antes** do método | Libera ou bloqueia a execução (a mais usada) | Já vem ativa |
+| `@PostAuthorize` | **Depois** do método | Decide com base no **retorno** (`returnObject`) | Já vem ativa |
+| `@PreFilter` | **Antes** do método | Filtra a **coleção recebida** como parâmetro | Já vem ativa |
+| `@PostFilter` | **Depois** do método | Filtra a **coleção retornada** | Já vem ativa |
+| `@Secured` | **Antes** do método | Só roles, com o prefixo: `@Secured("ROLE_ADMIN")` | `securedEnabled = true` |
+| `@RolesAllowed` | **Antes** do método | Padrão JSR-250, só roles: `@RolesAllowed("ADMIN")` | `jsr250Enabled = true` |
+
+Para ativar as duas últimas:
+
+```java
+@EnableMethodSecurity(securedEnabled = true, jsr250Enabled = true)
+```
+
+> [!TIP]
+> Para estudo, concentre-se em **`@PreAuthorize`**. Ela aceita expressões completas e substitui `@Secured` e `@RolesAllowed` na maioria dos casos.
+
+### 🧮 Expressões (SpEL) mais usadas
+
+Elas ficam dentro da anotação, entre aspas, e usam **aspas simples** para os textos:
+
+| Expressão | Significado |
+|---|---|
+| `hasRole('ADMIN')` | Tem a role ADMIN |
+| `hasAnyRole('MANAGER', 'ADMIN')` | Tem pelo menos uma das roles |
+| `hasAuthority('ROLE_ADMIN')` | Tem a authority exata (com prefixo) |
+| `isAuthenticated()` | Está logado |
+| `permitAll()` / `denyAll()` | Libera todos / bloqueia todos |
+| `authentication.name` | Username do usuário logado |
+| `#id` | Valor do parâmetro `id` do método |
+| `returnObject` | Objeto retornado (só no `@PostAuthorize` e `@PostFilter`) |
+| `filterObject` | Item atual da coleção (só no `@PreFilter` e `@PostFilter`) |
+| `@bean.metodo(...)` | Chama um método de um bean Spring |
+
+Dá para combinar com `and`, `or` e `!`:
+
+```java
+@PreAuthorize("hasRole('MANAGER') or hasRole('ADMIN')")
+```
+
+### 💡 Exemplos de cada anotação
+
+**`@PostAuthorize`**: busca primeiro e confere o dono do resultado depois.
+
+```java
+@GetMapping("/{id}")
+@PostAuthorize("returnObject.username == authentication.name or hasRole('ADMIN')")
+public Employee findById(@PathVariable Long id) {
+    return repository.findById(id).orElseThrow();
+}
+```
+
+**`@PostFilter`**: devolve só os itens que o usuário pode ver.
+
+```java
+@GetMapping
+@PostFilter("filterObject.username == authentication.name or hasRole('MANAGER')")
+public List<Employee> findAll() {
+    return repository.findAll();
+}
+```
+
+**`@PreFilter`**: descarta, antes de executar, os itens que o usuário não pode enviar.
+
+```java
+@PreFilter("filterObject.username == authentication.name")
+public void saveAll(List<Employee> employees) {
+    repository.saveAll(employees);
+}
+```
+
+**`@Secured` e `@RolesAllowed`**:
+
+```java
+@Secured("ROLE_ADMIN")          // com o prefixo ROLE_
+public void metodoA() { }
+
+@RolesAllowed("ADMIN")          // sem o prefixo
+public void metodoB() { }
+```
+
+> [!WARNING]
+> `@PostFilter` carrega **todos** os registros do banco e filtra na memória. Em tabelas grandes, prefira filtrar na própria consulta (ex.: `findByUsername`).
+
+### 👥 Cada usuário vê apenas o seu registro
+
+**1. Ligue o usuário logado ao registro** guardando o `username` na entidade:
+
+```java
+@Entity
+public class Employee {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String name;
+
+    private String username; // mesmo valor usado no login (ex.: "Gabriel")
+
+    // getters e setters
+}
+```
+
+**2. Crie um componente que confere o dono:**
+
+```java
+@Component("employeeSecurity")
+public class EmployeeSecurity {
+
+    private final EmployeeRepository repository;
+
+    public EmployeeSecurity(EmployeeRepository repository) {
+        this.repository = repository;
+    }
+
+    public boolean isOwner(Long id, String username) {
+        return repository.findById(id)
+                .map(e -> e.getUsername().equals(username))
+                .orElse(false);
+    }
+}
+```
+
+**3. Use no método:**
+
+```java
+@GetMapping("/{id}")
+@PreAuthorize("hasAnyRole('MANAGER', 'ADMIN') or @employeeSecurity.isOwner(#id, authentication.name)")
+public Employee findById(@PathVariable Long id) {
+    return repository.findById(id).orElseThrow();
+}
+```
+
+Resultado: o funcionário só vê o **próprio** registro, enquanto gerentes e admins veem todos. Qualquer outra tentativa retorna **403**.
+
+### ⚠️ Cuidados
+
+> [!WARNING]
+> - As anotações só funcionam em **beans do Spring** (`@Controller`, `@Service`, `@Component`...), chamados **de fora** da classe. Um `this.metodo()` dentro da mesma classe **ignora** a anotação.
+> - Anote métodos **públicos**. Métodos `private` não são protegidos.
+> - Se você tiver um `@ExceptionHandler(Exception.class)` genérico, ele pode capturar o `AccessDeniedException` e devolver **500** no lugar do **403**. Trate essa exceção separadamente.
+
+## 🚀 Indo para produção
+
+- [x] Entender usuários em memória, roles e restrição de rotas (este guia)
+- [x] Conhecer a segurança por método (`@PreAuthorize` e cia.)
+- [ ] Trocar `{noop}` por `BCryptPasswordEncoder`
+- [ ] Buscar usuários no banco com um `UserDetailsService` próprio
+- [ ] Reativar o CSRF ou adotar autenticação stateless (JWT / OAuth2)
+- [ ] Nunca versionar senhas reais no repositório
+
 ## 📚 Referências
 
 - [Documentação do Spring Security](https://docs.spring.io/spring-security/reference/)
 - [Password Storage](https://docs.spring.io/spring-security/reference/features/authentication/password-storage.html)
+- [Method Security](https://docs.spring.io/spring-security/reference/servlet/authorization/method-security.html)
 - [spring-projects/spring-security no GitHub](https://github.com/spring-projects/spring-security)
