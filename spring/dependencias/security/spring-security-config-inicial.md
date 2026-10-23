@@ -24,7 +24,7 @@ Uma base inicial para quem está começando no Spring Security: usuários em mem
 - [Indo para produção](#-indo-para-produção)
 - [Referências](#-referências)
 
-## 🪜 Passo a passo
+##  Passo a passo
 
 1. Crie uma pasta (pacote) chamada `security`.
 2. Dentro dela, crie a classe `DemoSecurityConfig`.
@@ -36,7 +36,7 @@ Uma base inicial para quem está começando no Spring Security: usuários em mem
 > [!IMPORTANT]
 > Os usuários (passo 4) dizem **quem** pode entrar. O `SecurityFilterChain` (passo 5) diz **o que cada um pode acessar**. Sem ele, qualquer usuário autenticado acessa qualquer rota, e as roles não servem de nada.
 
-## 💻 Código completo
+##  Código completo
 
 `security/DemoSecurityConfig.java`
 
@@ -98,7 +98,7 @@ public class DemoSecurityConfig {
 > [!NOTE]
 > Ao usar `.roles("EMPLOYEE")`, o Spring guarda internamente a authority `ROLE_EMPLOYEE`. Por isso `hasRole("EMPLOYEE")` funciona sem escrever o prefixo.
 
-## 🧪 Como testar
+## Como testar
 
 **Postman**
 
@@ -133,7 +133,7 @@ sequenceDiagram
     F-->>C: 200 / 401 / 403
 ```
 
-## 👤 UserDetails
+##  UserDetails
 
 É a **interface que representa o usuário** dentro do Spring Security. O framework não conhece a sua classe de usuário, ele só conhece o `UserDetails`.
 
@@ -160,7 +160,7 @@ UserDetails gabriel = User.builder()
 > [!TIP]
 > Em projetos reais, é comum fazer a própria entidade `Usuario` implementar `UserDetails`, ou converter a entidade em um `UserDetails` dentro do `UserDetailsService`.
 
-## 🧠 InMemoryUserDetailsManager
+##  InMemoryUserDetailsManager
 
 É uma implementação pronta que **guarda os usuários na memória da aplicação**, sem precisar de banco de dados. Você entrega os `UserDetails` no construtor e ele cuida da busca durante o login:
 
@@ -269,7 +269,7 @@ public InMemoryUserDetailsManager userDetailsManager(PasswordEncoder encoder) {
 > [!TIP]
 > O BCrypt gera um hash **diferente a cada chamada** (salt aleatório). Por isso a verificação é sempre feita com `matches()`, nunca com `equals()`.
 
-## 🚦 Restrição de rotas
+##  Restrição de rotas
 
 Agora veremos como **restringir rotas** para que apenas usuários com a **role** correta possam acessar determinados recursos.
 
@@ -322,7 +322,7 @@ http.authorizeHttpRequests(auth -> auth
 > [!IMPORTANT]
 > **A ordem importa.** O Spring aplica a **primeira** regra que casar com a requisição. Coloque as regras mais específicas primeiro e deixe o `anyRequest()` sempre por último.
 
-### 🌟 O que são os asteriscos (`*`)?
+###  O que são os asteriscos (`*`)?
 
 Eles definem **quanto do caminho** a regra cobre:
 
@@ -409,7 +409,7 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 | `csrf.disable()` | Desativa a proteção CSRF (somente para estudo) |
 | `http.build()` | Constrói e devolve a cadeia de filtros |
 
-### 🚨 Respostas esperadas
+###  Respostas esperadas
 
 | Código | Significado |
 |:---:|---|
@@ -430,7 +430,7 @@ O `requestMatchers` protege por **URL**. Já a **segurança por método** proteg
 > [!TIP]
 > Os dois se combinam: use o `requestMatchers` para as regras gerais e as anotações para o filtro fino por cima.
 
-### 🪜 Passo a passo
+###  Passo a passo
 
 **1. Habilite a segurança por método** na `DemoSecurityConfig`:
 
@@ -488,7 +488,7 @@ Para ativar as duas últimas:
 > [!TIP]
 > Para estudo, concentre-se em **`@PreAuthorize`**. Ela aceita expressões completas e substitui `@Secured` e `@RolesAllowed` na maioria dos casos.
 
-### 🧮 Expressões (SpEL) mais usadas
+### Expressões (SpEL) mais usadas
 
 Elas ficam dentro da anotação, entre aspas, e usam **aspas simples** para os textos:
 
@@ -555,7 +555,7 @@ public void metodoB() { }
 > [!WARNING]
 > `@PostFilter` carrega **todos** os registros do banco e filtra na memória. Em tabelas grandes, prefira filtrar na própria consulta (ex.: `findByUsername`).
 
-### 👥 Cada usuário vê apenas o seu registro
+###  Cada usuário vê apenas o seu registro
 
 **1. Ligue o usuário logado ao registro** guardando o `username` na entidade:
 
@@ -614,7 +614,7 @@ Resultado: o funcionário só vê o **próprio** registro, enquanto gerentes e a
 > - Anote métodos **públicos**. Métodos `private` não são protegidos.
 > - Se você tiver um `@ExceptionHandler(Exception.class)` genérico, ele pode capturar o `AccessDeniedException` e devolver **500** no lugar do **403**. Trate essa exceção separadamente.
 
-## 🚀 Indo para produção
+## Indo para produção
 
 - [x] Entender usuários em memória, roles e restrição de rotas (este guia)
 - [x] Conhecer a segurança por método (`@PreAuthorize` e cia.)
