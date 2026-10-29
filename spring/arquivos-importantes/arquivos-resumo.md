@@ -282,9 +282,15 @@ logging:
 ### Substituição de valores: `${...}`
 
 ```properties
-spring.datasource.password=${DB_PASSWORD}                  # obrigatório: se faltar, a aplicação falha ao iniciar
-spring.datasource.username=${DB_USER:postgres}             # com padrão: se DB_USER não existir, usa "postgres"
+# obrigatório: se DB_PASSWORD não existir, a aplicação falha ao iniciar
+spring.datasource.password=${DB_PASSWORD}
+
+# com valor padrão: se DB_USER não existir, usa "postgres"
+spring.datasource.username=${DB_USER:postgres}
 ```
+
+> [!WARNING]
+> Em arquivos `.properties`, **comentário só funciona em linha separada**, começando com `#`. Um comentário no fim da linha (`chave=valor  # texto`) **vira parte do valor**.
 
 Os valores vêm de **variáveis de ambiente**, **argumentos de linha de comando** e outras propriedades.
 
@@ -329,7 +335,9 @@ src/main/resources/
 
 ```properties
 spring.application.name=demo
-spring.profiles.active=dev          # perfil padrão ao rodar localmente
+
+# perfil padrão ao rodar localmente
+spring.profiles.active=dev
 ```
 
 `application-dev.properties` (desenvolvimento):
@@ -448,7 +456,7 @@ public class EmailService {
 
 ## .env: variáveis de ambiente e segredos
 
-O arquivo **`.env`** guarda **valores sensíveis e específicos da sua máquina** (senhas, tokens, chaves de API) em linhas simples `CHAVE=valor`. **Ele nunca vai para o GitHub.**
+O arquivo **`.env`** guarda **valores sensíveis e específicos da sua máquina** (senhas, tokens, chaves de API) em linhas simples no formato `CHAVE=valor`. **Ele nunca vai para o GitHub.**
 
 ```dotenv
 # .env  (NÃO versionar)
@@ -472,36 +480,6 @@ API_TOKEN=
 
 Quem clonar o projeto faz `cp .env.example .env` e preenche os valores.
 
-```mermaid
-flowchart LR
-    A[.env<br/>DB_PASSWORD=123] --> B[Variáveis de ambiente<br/>do processo]
-    B --> C[application.properties<br/>password=$&#123;DB_PASSWORD&#125;]
-    C --> D[Bean DataSource<br/>conecta no banco]
-```
-
-### Como o Spring Boot lê o `.env`
-
-> [!NOTE]
-> O Spring Boot **não** lê o `.env` sozinho. Ele só enxerga **variáveis de ambiente** reais. Há algumas formas de levar o conteúdo do `.env` até ele:
-
-| Forma | Como |
-|---|---|
-| **Importar no próprio Spring** | `spring.config.import=optional:file:.env[.properties]` no `application.properties` |
-| **Variáveis na IDE** | Cadastre no *Run Configuration* (IntelliJ: *Environment variables*, que também aceita carregar um arquivo `.env`) |
-| **No terminal** | `export DB_PASSWORD=123` antes de rodar (Linux/Mac) |
-| **Docker Compose** | `env_file: .env` no serviço |
-| **Biblioteca** | Pacotes como `dotenv-java` leem o `.env` no código |
-
-A primeira opção é **nativa** e a mais simples:
-
-```properties
-# application.properties
-spring.config.import=optional:file:.env[.properties]     # lê o .env como se fosse um arquivo de propriedades; "optional" = não falha se não existir
-```
-
-> [!WARNING]
-> O `.env` é para **desenvolvimento local**. Em produção, defina as variáveis **no servidor ou na plataforma** (Docker, Kubernetes, Render, Railway, AWS...) e não copie o arquivo `.env` para lá.
-
 ### O que deve ir para o `.env`
 
 | ✅ Vai para o `.env` | ❌ Fica no `application.properties` |
@@ -511,6 +489,188 @@ spring.config.import=optional:file:.env[.properties]     # lê o .env como se fo
 | Segredo do JWT | Níveis de log |
 | Credenciais de serviços externos | Paginação e outras configurações não secretas |
 | URLs que mudam por ambiente | Padrões que servem para todos |
+
+### Como o Spring Boot enxerga o `.env`
+
+> [!NOTE]
+> O Spring Boot **não lê o `.env` sozinho**. Por padrão, ele só enxerga **variáveis de ambiente de verdade** (as do sistema operacional). É preciso "apresentar" o arquivo a ele, e há dois caminhos:
+
+```mermaid
+flowchart LR
+    A[Arquivo .env] -->|spring.config.import| B[Propriedades do Spring]
+    C[Variáveis de ambiente reais<br/>IDE, terminal, Docker, plataforma] --> D[Environment do Spring]
+    B --> D
+    D --> E[application.properties<br/>usa as chaves do .env]
+    E --> F[Beans da aplicação<br/>DataSource, JWT etc.]
+```
+
+| Caminho | Como funciona |
+|---|---|
+| **1. Importar o arquivo** | O Spring lê o `.env` e transforma as linhas em **propriedades** (`spring.config.import`) |
+| **2. Variáveis reais** | Algo fora do Spring (IDE, terminal, Docker, plataforma) carrega o `.env` e entrega ao processo como **variáveis de ambiente** |
+
+### A forma nativa: `spring.config.import`
+
+É a melhor para **desenvolvimento local**, porque **não precisa de nenhuma dependência**. Esta é a linha que importa o arquivo:
+
+```properties
+spring.config.import=optional:file:.env[.properties]
+```
+
+| Parte | O que significa |
+|---|---|
+| `spring.config.import` | Manda o Spring importar mais um arquivo de configuração |
+| `optional:` | Se o arquivo não existir, **não dá erro**. Isso é essencial em produção, onde não há `.env` |
+| `file:` | Procura no **sistema de arquivos**, e não dentro do `classpath` |
+| `.env` | Caminho relativo à **pasta de onde a aplicação é executada** (*working directory*) |
+| `[.properties]` | Diz ao Spring para ler o arquivo no formato `.properties`, já que o `.env` não tem extensão |
+
+#### Exemplo completo
+
+`.env` (fora do Git):
+
+```dotenv
+DB_URL=jdbc:postgresql://localhost:5432/meubanco
+DB_USER=postgres
+DB_PASSWORD=minha-senha
+JWT_SECRET=chave-longa-e-aleatoria
+```
+
+`application.properties` (vai para o Git, só com referências):
+
+```properties
+spring.datasource.url=${DB_URL}
+spring.datasource.username=${DB_USER}
+spring.datasource.password=${DB_PASSWORD}
+app.jwt.secret=${JWT_SECRET}
+```
+
+`application-dev.properties` (o import fica só no perfil de desenvolvimento):
+
+```properties
+# importa o .env apenas no ambiente de desenvolvimento
+spring.config.import=optional:file:.env[.properties]
+```
+
+> [!TIP]
+> Coloque o `import` no `application-dev.properties` (ou em um `application-local.properties`) em vez do arquivo comum. Assim, só o desenvolvimento procura o `.env`, e a produção usa apenas as variáveis reais do servidor.
+
+> [!WARNING]
+> Em arquivos `.properties`, **comentário só funciona em linha separada**, começando com `#`. Um comentário no fim da linha (`chave=valor  # texto`) **vira parte do valor**.
+
+#### Cuidados com esse método
+
+O arquivo é lido como **`.properties`**, e não como um `.env` "de verdade". Por isso:
+
+| Situação | O que acontece |
+|---|---|
+| **Aspas**: `DB_PASSWORD="abc"` | As aspas **não são removidas**: a senha passa a ser `"abc"` com aspas |
+| **`export`**: `export DB_PASSWORD=abc` | **Não funciona**. Escreva só `DB_PASSWORD=abc` |
+| **Comentário no fim da linha** | Vira parte do valor. Comente só em linhas separadas |
+| **Barra invertida `\`** | É caractere de escape. Em caminhos do Windows, use `/` |
+| **`System.getenv("DB_URL")`** | **Não enxerga** as chaves do `.env` importado. Use `${DB_URL}` nos arquivos de propriedades ou `@Value("${DB_URL}")` no código |
+| **`SPRING_DATASOURCE_URL` dentro do `.env`** | **Não** vira `spring.datasource.url` sozinho. Essa conversão automática (*relaxed binding*) só vale para variáveis de ambiente reais. Dentro do `.env` importado, use `spring.datasource.url=...` ou referencie com `${...}` |
+| **Executar de outra pasta** | O caminho `.env` é relativo à *working directory*. Ajuste, por exemplo: `optional:file:../.env[.properties]` |
+
+> [!NOTE]
+> **Prioridade:** os valores do arquivo importado têm precedência sobre o arquivo que fez o import. Já as **variáveis de ambiente reais** do sistema vencem as duas.
+
+### Outras formas de carregar o `.env`
+
+| Forma | Como | Quando usar |
+|---|---|---|
+| **IDE** | IntelliJ: campo *Environment variables* da configuração de execução (ou o plugin EnvFile). VS Code: `"envFile": "${workspaceFolder}/.env"` no `launch.json` | Você roda sempre pela IDE |
+| **Terminal** | Linux/Mac: `set -a; source .env; set +a` e depois `./mvnw spring-boot:run` | Você roda pelo terminal |
+| **Docker Compose** | `env_file: .env` ou `environment:` no serviço | A aplicação roda em contêiner |
+| **Biblioteca `dotenv-java`** | Carrega o `.env` no `main`, antes de iniciar o Spring | Você precisa do `.env` como variáveis de verdade ou de uma sintaxe mais fiel ao `.env` |
+| **Variáveis da plataforma** | Painel de Render, Railway, AWS, Kubernetes etc. | **Produção** |
+| **`configtree`** | `spring.config.import=optional:configtree:/run/secrets/` | Segredos do Docker e do Kubernetes, que chegam como **um arquivo por segredo** |
+
+#### Exemplo com a biblioteca `dotenv-java`
+
+Dependência: `io.github.cdimascio:dotenv-java`.
+
+```java
+public static void main(String[] args) {
+    Dotenv.configure()
+          .ignoreIfMissing()                                    // não falha se o .env não existir
+          .systemProperties()                                   // joga os valores nas propriedades do sistema (System.getProperty)
+          .load();
+    SpringApplication.run(DemoApplication.class, args);         // o Spring já inicia enxergando os valores
+}
+```
+
+#### Exemplo no terminal (Linux/Mac)
+
+```bash
+set -a              # tudo que for definido a partir daqui vira variável de ambiente
+source .env         # lê o arquivo .env
+set +a              # desliga o modo automático
+./mvnw spring-boot:run
+```
+
+No Windows (PowerShell), uma opção é definir as variáveis na sessão:
+
+```powershell
+$env:DB_PASSWORD = "minha-senha"
+./mvnw spring-boot:run
+```
+
+### Qual usar em cada ambiente
+
+| Ambiente | Recomendação |
+|---|---|
+| **Desenvolvimento local** | `spring.config.import` no `application-dev.properties` (ou variáveis na IDE) |
+| **Docker / Compose** | `env_file` ou `environment` no `docker-compose.yml` |
+| **CI (GitHub Actions)** | `secrets` do GitHub, passados como `env:` (veja [.github](#github-automações-do-github)) |
+| **Produção** | Variáveis de ambiente reais da plataforma, ou `configtree` para segredos. **Sem `.env` no servidor** |
+
+### Como conferir se funcionou
+
+Uma forma rápida é injetar um valor **não secreto** e imprimi-lo na inicialização:
+
+```java
+@Component
+class ConfigCheck implements CommandLineRunner {
+
+    @Value("${DB_USER:NAO-ENCONTRADO}")                         // se o .env não foi lido, aparece o texto padrão
+    private String dbUser;
+
+    @Override
+    public void run(String... args) {
+        System.out.println("DB_USER = " + dbUser);
+    }
+}
+```
+
+Se aparecer `NAO-ENCONTRADO`, o `.env` não foi carregado. Depois do teste, **apague essa classe**, e nunca imprima senhas ou tokens.
+
+Para ver, nos logs, **quais arquivos de configuração o Spring carregou**, rode com o nível de log abaixo (ele costuma mostrar o processamento dos imports):
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--logging.level.org.springframework.boot.context.config=TRACE
+```
+
+### Problemas comuns
+
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| `Could not resolve placeholder 'DB_PASSWORD'` | A variável não foi carregada | Confira o perfil ativo, o caminho do `.env` e o nome da chave (diferencia maiúsculas de minúsculas) |
+| Senha "certa" mas o banco recusa | Aspas ou espaços no valor, ou comentário no fim da linha | Remova aspas, espaços sobrando e comentários na mesma linha |
+| Funciona na IDE e falha no terminal (ou o contrário) | A *working directory* é diferente, então o caminho `.env` aponta para outro lugar | Padronize onde roda, ou ajuste o caminho do import |
+| `System.getenv("X")` devolve `null` | O `.env` foi importado como **propriedades**, e não como variáveis de ambiente | Use `@Value("${X}")` ou `Environment.getProperty("X")` |
+| Funciona local e falha em produção | Não há `.env` no servidor | Defina as variáveis na plataforma de deploy |
+| `.env` aparece no `git status` | Foi versionado antes de entrar no `.gitignore` | `git rm --cached .env` e veja [Se um segredo foi parar no GitHub](#se-um-segredo-foi-parar-no-github) |
+
+### Segurança
+
+- [x] `.env` no **`.gitignore`** e no **`.dockerignore`**
+- [x] Versionar só o **`.env.example`**, sem valores reais
+- [x] Gerar segredos **fortes e aleatórios**, por exemplo: `openssl rand -base64 48`
+- [x] **Um `.env` por pessoa e por ambiente**: não compartilhe o mesmo arquivo por e-mail ou chat
+- [x] **Não imprimir** valores do `.env` em logs
+- [x] Trocar o segredo imediatamente se ele **vazar**
+- [x] Em produção, **não** copiar o `.env` para o servidor: use as variáveis da plataforma
 
 ---
 
@@ -715,12 +875,24 @@ Com o Flyway cuidando do banco, use `spring.jpa.hibernate.ddl-auto=validate`. Pa
 ### Dockerfile: empacota a aplicação em uma imagem
 
 ```dockerfile
-FROM eclipse-temurin:21-jre         # imagem base, só com o Java para EXECUTAR
-WORKDIR /app                        # pasta de trabalho dentro do contêiner
-COPY target/*.jar app.jar           # copia o .jar gerado pelo ./mvnw clean package
-EXPOSE 8080                         # documenta a porta usada
-ENTRYPOINT ["java", "-jar", "app.jar"]   # comando que inicia a aplicação
+# imagem base, só com o Java para EXECUTAR
+FROM eclipse-temurin:21-jre
+
+# pasta de trabalho dentro do contêiner
+WORKDIR /app
+
+# copia o .jar gerado pelo ./mvnw clean package
+COPY target/*.jar app.jar
+
+# documenta a porta usada
+EXPOSE 8080
+
+# comando que inicia a aplicação
+ENTRYPOINT ["java", "-jar", "app.jar"]
 ```
+
+> [!NOTE]
+> No Dockerfile, comentário também só funciona **em linha separada**. Um `#` no meio da linha é tratado como parte do comando.
 
 ### .dockerignore: o que não enviar para o build da imagem
 
@@ -774,7 +946,7 @@ docker compose up --build
 ```
 
 > [!NOTE]
-> O Docker Compose lê o `.env` da pasta do projeto para substituir `${DB_USER}` e `${DB_PASSWORD}`. Por isso o mesmo `.env` serve ao Compose e (com o `spring.config.import`) ao Spring.
+> O Docker Compose lê o `.env` da pasta do projeto para substituir `${DB_USER}` e `${DB_PASSWORD}`. Por isso o mesmo `.env` serve ao Compose e (com o `spring.config.import`) ao Spring. Só mantenha o arquivo **simples** (`CHAVE=valor`, sem aspas), porque o Compose e o Spring interpretam aspas de formas diferentes.
 
 ---
 
