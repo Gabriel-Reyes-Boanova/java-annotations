@@ -13,6 +13,10 @@
 - [Anatomia de uma entidade](#anatomia-de-uma-entidade)
 - [As variáveis (campos) de uma entidade](#as-variáveis-campos-de-uma-entidade)
 - [Relacionamentos entre entidades](#relacionamentos-entre-entidades)
+  - [@ManyToOne: muitos para um](#manytoone-muitos-para-um)
+  - [@OneToMany: um para muitos](#onetomany-um-para-muitos)
+  - [@ManyToMany: muitos para muitos](#manytomany-muitos-para-muitos)
+  - [@OneToOne: um para um](#onetoone-um-para-um)
 - [Entidade base com auditoria](#entidade-base-com-auditoria)
 - [Entities para o Spring Security](#entities-para-o-spring-security)
 - [Diferenças entre a visão do JPA e a do Security](#diferenças-entre-a-visão-do-jpa-e-a-do-security)
@@ -326,85 +330,706 @@ private void normalizar() {
 
 ## Relacionamentos entre entidades
 
+Em um banco relacional, as tabelas se ligam por **chaves estrangeiras** (*foreign keys*). No JPA, essa ligação vira uma **referência entre objetos**: em vez de um número `usuario_id` solto, o `Pedido` guarda um objeto `Usuario`.
+
+| No banco | No Java |
+|---|---|
+| Coluna `usuario_id` (chave estrangeira) | Campo `Usuario usuario` |
+| `JOIN` entre tabelas | `pedido.getUsuario().getNome()` |
+| Tabela de ligação (`usuarios_perfis`) | Campo `Set<Perfil> perfis` |
+
+Existem **quatro** anotações, uma para cada cardinalidade (quantos de um lado se ligam a quantos do outro):
+
+| Anotação | Cardinalidade | Exemplo deste projeto |
+|---|---|---|
+| [`@ManyToOne`](#manytoone-muitos-para-um) | Muitos para um | Muitos pedidos → **um** usuário |
+| [`@OneToMany`](#onetomany-um-para-muitos) | Um para muitos | **Um** pedido → muitos itens |
+| [`@ManyToMany`](#manytomany-muitos-para-muitos) | Muitos para muitos | Muitos usuários ↔ muitos perfis |
+| [`@OneToOne`](#onetoone-um-para-um) | Um para um | **Um** usuário ↔ **um** registro de dados pessoais |
+
 ```mermaid
 erDiagram
-    USUARIOS ||--o{ PEDIDOS : "faz"
-    USUARIOS }o--o{ PERFIS : "possui (usuarios_perfis)"
-    PEDIDOS ||--|{ ITENS_PEDIDO : "contém"
+    USUARIOS ||--o{ PEDIDOS : "faz (ManyToOne / OneToMany)"
+    USUARIOS }o--o{ PERFIS : "possui (ManyToMany)"
+    USUARIOS ||--o| DADOS_PESSOAIS : "tem (OneToOne)"
+    PEDIDOS ||--|{ ITENS_PEDIDO : "contém (OneToMany)"
+    PRODUTOS ||--o{ ITENS_PEDIDO : "aparece em (ManyToOne)"
     USUARIOS {
         bigint id PK
         varchar nome
         varchar email UK
-        varchar senha_hash
-        boolean ativo
     }
     PERFIS {
         bigint id PK
         varchar nome UK
+    }
+    DADOS_PESSOAIS {
+        bigint usuario_id PK
+        varchar telefone
     }
     PEDIDOS {
         bigint id PK
         bigint usuario_id FK
         varchar status
     }
+    ITENS_PEDIDO {
+        bigint id PK
+        bigint pedido_id FK
+        bigint produto_id FK
+        int quantidade
+    }
+    PRODUTOS {
+        bigint id PK
+        varchar nome
+        decimal preco
+    }
 ```
 
-| Anotação | Relação | Exemplo | Carregamento padrão |
-|---|---|---|---|
-| `@ManyToOne` | Muitos para um | Muitos pedidos → um usuário | **EAGER** (ansioso) |
-| `@OneToMany` | Um para muitos | Um pedido → muitos itens | LAZY (preguiçoso) |
-| `@ManyToMany` | Muitos para muitos | Usuários ↔ perfis | LAZY |
-| `@OneToOne` | Um para um | Usuário → perfil detalhado | **EAGER** |
+### Como escolher a anotação certa
+
+Faça duas perguntas: *"um A se liga a quantos B?"* e *"um B se liga a quantos A?"*.
+
+```mermaid
+flowchart TD
+    A{"Um A se liga a quantos B?"} -->|Um| B{"Um B se liga a quantos A?"}
+    A -->|Muitos| C{"Um B se liga a quantos A?"}
+    B -->|Um| D["@OneToOne"]
+    B -->|Muitos| E["@ManyToOne<br/>(o campo fica em A)"]
+    C -->|Um| F["@OneToMany em A<br/>+ @ManyToOne em B"]
+    C -->|Muitos| G["@ManyToMany<br/>ou uma entidade intermediária"]
+```
+
+Exemplo: *um pedido (A) tem um usuário (B), e um usuário tem muitos pedidos.* O Pedido guarda um `@ManyToOne` para o Usuário.
+
+### Conceitos que valem para todas as relações
+
+| Conceito | O que significa |
+|---|---|
+| **Lado dono** (*owning side*) | O lado que **controla a chave estrangeira**. É ele que o JPA usa para gravar a relação no banco. Em `@ManyToOne`, é sempre quem tem o `@JoinColumn` |
+| **Lado inverso** (*inverse side*) | O lado que só **espelha** a relação, marcado com `mappedBy`. Alterar só o lado inverso **não grava nada** no banco |
+| **`mappedBy`** | Diz "quem manda na relação é o campo `X` da outra classe". Evita criar uma tabela ou coluna duplicada |
+| **Unidirecional** | Só **uma** das classes conhece a outra (`Pedido` conhece `Usuario`, mas `Usuario` não conhece `Pedido`) |
+| **Bidirecional** | As **duas** classes se conhecem. Exige manter os dois lados sincronizados |
+| **`@JoinColumn`** | Define a **coluna** da chave estrangeira |
+| **`@JoinTable`** | Define a **tabela de ligação** (usada no `@ManyToMany`) |
+| **`fetch`** | **Quando** carregar: `LAZY` (só ao usar) ou `EAGER` (sempre junto) |
+| **`cascade`** | Propaga operações (salvar, remover) do pai para os filhos |
+| **`orphanRemoval`** | Apaga do banco o filho que foi **retirado** da coleção do pai |
+| **`optional`** | `false` = a relação é obrigatória (o campo nunca é `null`) |
 
 > [!TIP]
-> Declare **`fetch = FetchType.LAZY`** em todo `@ManyToOne` e `@OneToOne`. O padrão EAGER carrega dados que você talvez nem use e é uma das causas mais comuns de lentidão (problema N+1).
+> Comece sempre pela **relação unidirecional** e só torne bidirecional se realmente precisar navegar nos dois sentidos. Cada lado a mais é mais código para manter sincronizado.
 
-### `@ManyToOne`: o lado que tem a chave estrangeira
+### `fetch`: LAZY ou EAGER
+
+| | `LAZY` (preguiçoso) | `EAGER` (ansioso) |
+|---|---|---|
+| Quando carrega | Só quando você **usa** o campo | **Sempre**, junto com a entidade |
+| Custo | Uma consulta a mais, **só se precisar** | Carrega mesmo quando não precisa |
+| Risco | `LazyInitializationException` fora da transação | Lentidão e o problema **N+1** |
+| Padrão do JPA em | `@OneToMany`, `@ManyToMany` | `@ManyToOne`, `@OneToOne` |
+
+> [!WARNING]
+> O padrão de `@ManyToOne` e `@OneToOne` é **EAGER**. Escreva **`fetch = FetchType.LAZY`** explicitamente em todos eles.
+
+Quando você **precisar** dos dados da relação, peça-os de forma explícita, na própria consulta:
+
+| Técnica | Como | Quando usar |
+|---|---|---|
+| **`@EntityGraph`** | `@EntityGraph(attributePaths = "usuario")` no método do repository | Simples, para consultas derivadas |
+| **`JOIN FETCH`** | `select p from Pedido p join fetch p.usuario` | Consultas `@Query` |
+| **DTO / projeção** | Buscar só as colunas necessárias | Telas de listagem |
+
+### `cascade`: o que cada valor faz
+
+| Valor | Efeito |
+|---|---|
+| `PERSIST` | Salvar o pai (`persist`) também salva os filhos novos |
+| `MERGE` | Atualizar o pai (`merge`) também atualiza os filhos |
+| `REMOVE` | Apagar o pai também apaga os filhos |
+| `REFRESH` | Recarregar o pai também recarrega os filhos |
+| `DETACH` | Desanexar o pai também desanexa os filhos |
+| `ALL` | Todos os acima |
+
+> [!IMPORTANT]
+> Use `cascade` **só quando o filho não existe sem o pai** (um *item* sem *pedido* não faz sentido). Se o outro lado tem vida própria (um *usuário*, um *perfil*, um *produto*), **não** use `REMOVE` nem `ALL`: apagar o pedido não pode apagar o usuário.
+
+---
+
+### @ManyToOne: muitos para um
+
+#### O que é
+
+Vários registros de uma tabela apontam para **um** registro de outra. **Um usuário faz muitos pedidos**, e cada pedido pertence a **um** usuário. Esta é a relação **mais comum** e a mais importante: é ela que cria a **chave estrangeira**.
+
+> O lado `@ManyToOne` é **sempre o lado dono**: a coluna `usuario_id` fica na tabela `pedidos`.
+
+#### Como fica no banco
+
+```sql
+CREATE TABLE pedidos (
+    id          BIGSERIAL PRIMARY KEY,
+    usuario_id  BIGINT NOT NULL,                       -- a chave estrangeira
+    status      VARCHAR(20) NOT NULL,
+    total       NUMERIC(19,2) NOT NULL,
+    CONSTRAINT fk_pedidos_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
+);
+```
+
+#### Como fica no código
 
 ```java
 @Entity
 @Table(name = "pedidos")
 public class Pedido extends BaseEntity {
 
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)   // todo pedido TEM um usuário; carrega só quando precisar
-    @JoinColumn(name = "usuario_id", nullable = false)     // coluna da chave estrangeira na tabela pedidos
-    private Usuario usuario;                               // o DONO do pedido (importante para a segurança)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)          // muitos pedidos -> um usuário; obrigatório; carrega só quando usar
+    @JoinColumn(name = "usuario_id", nullable = false,            // coluna da chave estrangeira em "pedidos"
+                foreignKey = @ForeignKey(name = "fk_pedidos_usuario"))   // nome da restrição (facilita ler erros)
+    private Usuario usuario;                                      // o DONO do pedido
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private StatusPedido status = StatusPedido.ABERTO;
 
     @Column(nullable = false, precision = 19, scale = 2)
-    private BigDecimal total = BigDecimal.ZERO;            // dinheiro: BigDecimal
+    private BigDecimal total = BigDecimal.ZERO;
 
-    @OneToMany(mappedBy = "pedido",                        // "pedido" é o campo em ItemPedido que é o dono da relação
-               cascade = CascadeType.ALL,                  // salvar/remover o pedido também salva/remove os itens
-               orphanRemoval = true)                       // item removido da lista é apagado do banco
-    private List<ItemPedido> itens = new ArrayList<>();
+    protected Pedido() { }                                        // construtor do JPA
 
-    public void adicionarItem(ItemPedido item) {           // método auxiliar: mantém os DOIS lados sincronizados
-        itens.add(item);
-        item.setPedido(this);
+    public Pedido(Usuario usuario) {                              // todo pedido nasce com um dono
+        this.usuario = usuario;
+    }
+
+    public Usuario getUsuario() { return usuario; }
+}
+```
+
+| Atributo | O que faz |
+|---|---|
+| `fetch = LAZY` | Não carrega o `Usuario` até alguém chamar `getUsuario()` |
+| `optional = false` | O pedido **sempre** tem usuário (o Hibernate valida antes de gravar) |
+| `@JoinColumn(name = ...)` | Nome da coluna da chave estrangeira |
+| `nullable = false` | A coluna é `NOT NULL` no banco |
+
+#### Como usar
+
+```java
+@Service
+public class PedidoService {
+
+    private final PedidoRepository pedidoRepository;
+    private final UsuarioRepository usuarioRepository;
+
+    public PedidoService(PedidoRepository pedidoRepository, UsuarioRepository usuarioRepository) {
+        this.pedidoRepository = pedidoRepository;
+        this.usuarioRepository = usuarioRepository;
+    }
+
+    @Transactional
+    public PedidoResponse criar(Long usuarioId) {
+        Usuario dono = usuarioRepository.getReferenceById(usuarioId);   // referência (proxy): NÃO faz SELECT agora
+        Pedido pedido = new Pedido(dono);                               // liga o pedido ao usuário
+        return PedidoResponse.de(pedidoRepository.save(pedido));        // INSERT em pedidos com usuario_id preenchido
     }
 }
 ```
 
-### Conceitos importantes
+> [!NOTE]
+> `getReferenceById` devolve uma **referência** ao usuário sem consultar o banco, o que é ótimo quando você só precisa do `id` para gravar a chave estrangeira. Se o `id` não existir, o erro só aparece ao gravar. Quando precisar **validar** que o usuário existe (e devolver um `404` amigável), use `findById(...)`.
 
-| Conceito | O que significa |
+```java
+public interface PedidoRepository extends JpaRepository<Pedido, Long> {
+
+    // WHERE usuario_id = ?   (usa a coluna da chave estrangeira, sem JOIN)
+    Page<Pedido> findByUsuarioId(Long usuarioId, Pageable pageable);
+
+    // traz o usuário na MESMA consulta (evita N+1 ao listar)
+    @EntityGraph(attributePaths = "usuario")
+    List<Pedido> findByStatus(StatusPedido status);
+}
+```
+
+#### Cuidados
+
+| Cuidado | Explicação |
 |---|---|
-| **Lado dono** | Quem tem a **chave estrangeira** (`@JoinColumn`). É quem o JPA usa para gravar a relação |
-| **`mappedBy`** | Usado no lado **inverso**: diz "quem manda é o outro lado" e evita criar uma tabela extra |
-| **`cascade`** | Propaga operações (salvar, remover) do pai para os filhos |
-| **`orphanRemoval`** | Apaga do banco o filho que foi retirado da lista do pai |
-| **`LAZY`** | Só carrega do banco quando você usa o campo |
-| **`EAGER`** | Carrega junto, sempre |
+| **Problema N+1** | Listar 100 pedidos e chamar `p.getUsuario().getNome()` em cada um gera **1 consulta + 100**. Use `@EntityGraph` ou `JOIN FETCH` |
+| **Nunca use `cascade = REMOVE` (ou `ALL`)** | Apagar um pedido **apagaria o usuário**, com todos os seus outros pedidos |
+| **`LAZY` e JSON** | Devolver a entidade direto no JSON tenta ler o proxy e quebra. Use DTO |
+| **Não troque o dono sem querer** | Aceitar `usuarioId` vindo do cliente permite criar pedidos **em nome de outra pessoa**. Pegue o dono do **usuário logado** (veja [Dono do recurso](#dono-do-recurso-como-evitar-idor)) |
+
+---
+
+### @OneToMany: um para muitos
+
+#### O que é
+
+É o **outro lado** do `@ManyToOne`: **um** registro se liga a **vários**. Um pedido tem **muitos** itens, e um usuário tem **muitos** pedidos. Por si só ela **não cria coluna**: a chave estrangeira continua na tabela dos "muitos" (`itens_pedido.pedido_id`).
+
+#### As duas formas de mapear
+
+| | **Bidirecional com `mappedBy`** (recomendada) | Unidirecional (só `@OneToMany`) |
+|---|---|---|
+| Como é | O filho tem `@ManyToOne` e o pai tem `@OneToMany(mappedBy = ...)` | Só o pai conhece os filhos |
+| Banco | Só a chave estrangeira no filho | Cria uma **tabela de ligação extra**, ou comandos `UPDATE` adicionais com `@JoinColumn` |
+| Desempenho | ✅ Melhor | ❌ Pior |
+| Código | Precisa manter os dois lados sincronizados | Mais simples |
+
+#### Como fica no código: composição (o filho não existe sem o pai)
+
+Um **item** só faz sentido dentro de um **pedido**. Por isso o pedido **controla o ciclo de vida** dos itens, com `cascade` e `orphanRemoval`:
+
+```java
+@Entity
+@Table(name = "pedidos")
+public class Pedido extends BaseEntity {
+
+    // ... id, usuario, status e total, como na seção anterior ...
+
+    @OneToMany(mappedBy = "pedido",                               // "pedido" é o campo de ItemPedido que é o DONO da relação
+               cascade = CascadeType.ALL,                         // salvar/atualizar/apagar o pedido faz o mesmo com os itens
+               orphanRemoval = true)                              // item retirado da lista é apagado do banco
+    private List<ItemPedido> itens = new ArrayList<>();           // sempre inicialize: evita NullPointerException
+
+    public void adicionarItem(ItemPedido item) {                  // método auxiliar: sincroniza os DOIS lados
+        itens.add(item);                                          // lado inverso (a lista)
+        item.setPedido(this);                                     // lado dono (a chave estrangeira)
+    }
+
+    public void removerItem(ItemPedido item) {
+        itens.remove(item);                                       // tira da lista
+        item.setPedido(null);                                     // desfaz a ligação
+    }
+
+    public List<ItemPedido> getItens() {
+        return Collections.unmodifiableList(itens);               // ninguém altera a lista de fora, só pelos métodos acima
+    }
+}
+```
+
+```java
+@Entity
+@Table(name = "itens_pedido")
+public class ItemPedido {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)          // LADO DONO: muitos itens -> um pedido
+    @JoinColumn(name = "pedido_id", nullable = false)             // a chave estrangeira fica AQUI
+    private Pedido pedido;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)          // muitos itens -> um produto
+    @JoinColumn(name = "produto_id", nullable = false)
+    private Produto produto;
+
+    @Column(nullable = false)
+    private int quantidade;
+
+    @Column(name = "preco_unitario", nullable = false, precision = 19, scale = 2)
+    private BigDecimal precoUnitario;                             // cópia do preço NA HORA da compra
+
+    protected ItemPedido() { }
+
+    public ItemPedido(Produto produto, int quantidade, BigDecimal precoUnitario) {
+        this.produto = produto;
+        this.quantidade = quantidade;
+        this.precoUnitario = precoUnitario;
+    }
+
+    void setPedido(Pedido pedido) {                               // sem "public": só classes do mesmo pacote (Pedido) chamam
+        this.pedido = pedido;
+    }
+}
+```
+
+> [!NOTE]
+> O `precoUnitario` é **copiado** do produto no momento da compra. Se o preço do produto mudar depois, o pedido antigo **não pode mudar** junto.
+
+#### Como fica no banco
+
+```sql
+CREATE TABLE itens_pedido (
+    id             BIGSERIAL PRIMARY KEY,
+    pedido_id      BIGINT NOT NULL REFERENCES pedidos (id),     -- a chave estrangeira está no lado "muitos"
+    produto_id     BIGINT NOT NULL REFERENCES produtos (id),
+    quantidade     INT NOT NULL,
+    preco_unitario NUMERIC(19,2) NOT NULL
+);
+```
+
+#### Como usar
+
+```java
+@Transactional
+public PedidoResponse criar(Long usuarioId, List<ItemRequest> itensRequest) {
+    Pedido pedido = new Pedido(usuarioRepository.getReferenceById(usuarioId));
+
+    for (ItemRequest req : itensRequest) {
+        Produto produto = produtoRepository.findById(req.produtoId())
+                .orElseThrow(() -> new ProdutoNaoEncontradoException(req.produtoId()));
+        pedido.adicionarItem(new ItemPedido(produto, req.quantidade(), produto.getPreco()));   // usa o método auxiliar
+    }
+
+    return PedidoResponse.de(pedidoRepository.save(pedido));   // o cascade grava o pedido E todos os itens
+}
+```
+
+Sem o `cascade`, seria preciso chamar `itemRepository.save(...)` para **cada** item.
+
+#### Como fica no código: agregação (o filho tem vida própria)
+
+Um **pedido** tem vida própria (é consultado, pago e enviado por conta própria), então o usuário **não controla** o ciclo de vida dele. Aqui **não há `cascade`**:
+
+```java
+// dentro de Usuario (opcional)
+@OneToMany(mappedBy = "usuario")                                  // o campo "usuario" de Pedido é o dono
+private List<Pedido> pedidos = new ArrayList<>();                 // sem cascade: apagar o usuário não apaga pedidos aqui
+```
+
+> [!TIP]
+> Se um usuário puder ter **milhares** de pedidos, **nem mapeie essa lista**. Chamar `usuario.getPedidos()` carregaria todos de uma vez. Prefira consultar pelo repository, com paginação: `pedidoRepository.findByUsuarioId(id, pageable)`.
+
+#### Cuidados
+
+| Cuidado | Explicação |
+|---|---|
+| **Esquecer o lado dono** | `pedido.getItens().add(item)` sem `item.setPedido(pedido)` **não grava** `pedido_id`. Use o método auxiliar |
+| **`mappedBy` ausente** | Sem ele, o JPA cria uma **tabela de ligação extra** que você não queria |
+| **`orphanRemoval` sem cuidado** | Substituir a lista inteira (`pedido.setItens(novaLista)`) pode gerar erro. Altere a lista existente |
+| **`List` e `JOIN FETCH` duplo** | Buscar **duas listas** de uma vez com `JOIN FETCH` causa `MultipleBagFetchException`. Busque uma por vez, ou use `Set` |
+| **`JOIN FETCH` de coleção com paginação** | O Hibernate pagina **na memória** (veja o arquivo de `Pageable`) |
+| **Referência circular no JSON** | `Pedido` → `itens` → `pedido` → `itens`... Use DTOs |
+| **Exposição da lista** | Devolva uma lista **não modificável** (`unmodifiableList`) para que ninguém altere de fora |
+
+DTO de saída sem referência circular:
+
+```java
+public record PedidoResponse(Long id, Long usuarioId, String usuarioNome,
+                             StatusPedido status, BigDecimal total, List<ItemPedidoResponse> itens) { }
+
+public record ItemPedidoResponse(Long produtoId, String produtoNome, int quantidade, BigDecimal precoUnitario) { }
+```
+
+---
+
+### @ManyToMany: muitos para muitos
+
+#### O que é
+
+**Vários** registros de um lado se ligam a **vários** do outro. Um usuário pode ter **vários perfis** (`ROLE_USER` e `ROLE_ADMIN`), e um perfil pode pertencer a **vários usuários**.
+
+Um banco relacional **não consegue** representar isso com uma coluna só. É preciso uma **tabela de ligação** (também chamada de *tabela associativa*), com uma chave estrangeira para cada lado:
+
+```mermaid
+erDiagram
+    USUARIOS ||--o{ USUARIOS_PERFIS : "possui"
+    PERFIS ||--o{ USUARIOS_PERFIS : "atribuído a"
+    USUARIOS_PERFIS {
+        bigint usuario_id PK, FK
+        bigint perfil_id PK, FK
+    }
+```
+
+#### Como fica no banco
+
+```sql
+CREATE TABLE usuarios_perfis (
+    usuario_id BIGINT NOT NULL REFERENCES usuarios (id),
+    perfil_id  BIGINT NOT NULL REFERENCES perfis (id),
+    PRIMARY KEY (usuario_id, perfil_id)                -- a mesma combinação não se repete
+);
+```
+
+#### Como fica no código
+
+```java
+@Entity
+@Table(name = "usuarios")
+public class Usuario extends BaseEntity {
+
+    // ... id, nome, email, senha etc. ...
+
+    @ManyToMany(fetch = FetchType.LAZY)                       // LADO DONO: muitos usuários <-> muitos perfis
+    @JoinTable(name = "usuarios_perfis",                      // nome da tabela de ligação
+            joinColumns = @JoinColumn(name = "usuario_id"),             // coluna que aponta para ESTE lado (Usuario)
+            inverseJoinColumns = @JoinColumn(name = "perfil_id"))       // coluna que aponta para o OUTRO lado (Perfil)
+    private Set<Perfil> perfis = new HashSet<>();             // Set: não permite o mesmo perfil duas vezes
+
+    public void adicionarPerfil(Perfil perfil) { perfis.add(perfil); }
+    public void removerPerfil(Perfil perfil)   { perfis.remove(perfil); }
+}
+```
+
+| Atributo | O que faz |
+|---|---|
+| `@JoinTable(name = ...)` | Nome da tabela de ligação |
+| `joinColumns` | Coluna da tabela de ligação que aponta para **a classe onde você está** |
+| `inverseJoinColumns` | Coluna da tabela de ligação que aponta para **a classe do outro lado** |
+| `fetch = LAZY` | Só carrega os perfis quando você usar (é o padrão) |
+
+##### O lado inverso (opcional)
+
+Só crie se **precisar** navegar de `Perfil` para os usuários:
+
+```java
+@Entity
+@Table(name = "perfis")
+public class Perfil {
+
+    // ... id e nome ...
+
+    @ManyToMany(mappedBy = "perfis")                          // "perfis" é o campo de Usuario que é o DONO
+    private Set<Usuario> usuarios = new HashSet<>();
+}
+```
 
 > [!WARNING]
-> **`CascadeType.REMOVE` (ou `ALL`) em `@ManyToMany` é perigoso.** Apagar um usuário apagaria os perfis, que outros usuários também usam. Em `@ManyToMany`, não use `cascade` de remoção.
+> Se você tornar a relação **bidirecional**, atualize os **dois** lados (`usuario.getPerfis().add(p)` **e** `p.getUsuarios().add(usuario)`). Mas só o **lado dono** (`Usuario`) é gravado no banco. Na dúvida, mantenha **unidirecional**.
+
+#### Como usar
+
+```java
+@Transactional
+public void promoverParaAdmin(Long usuarioId) {
+    Usuario usuario = usuarioRepository.findById(usuarioId)
+            .orElseThrow(() -> new UsuarioNaoEncontradoException(usuarioId));
+    Perfil admin = perfilRepository.findByNome(NomePerfil.ROLE_ADMIN)
+            .orElseThrow();
+
+    usuario.adicionarPerfil(admin);        // dentro da transação, o Hibernate faz o INSERT em usuarios_perfis sozinho
+}
+```
+
+```java
+public interface UsuarioRepository extends JpaRepository<Usuario, Long> {
+
+    // usuários que possuem um determinado perfil (percorre a relação: perfis.nome)
+    List<Usuario> findByPerfisNome(NomePerfil nome);
+
+    @EntityGraph(attributePaths = "perfis")                   // carrega os perfis junto
+    Optional<Usuario> findByEmailIgnoreCase(String email);
+}
+```
+
+#### `Set` ou `List`?
+
+| | `Set` | `List` |
+|---|---|---|
+| Duplicados | Não permite | Permite |
+| Ao **remover** um item | Apaga **só aquela linha** da tabela de ligação | O Hibernate **apaga todas as linhas desse dono e reinsere as restantes** |
+| `JOIN FETCH` de duas coleções | Funciona | Pode causar `MultipleBagFetchException` |
+
+Em `@ManyToMany`, **prefira `Set`**.
+
+#### Quando a ligação precisa de colunas extras: use uma entidade intermediária
+
+Um `@ManyToMany` puro só guarda **as duas chaves**. Se a ligação precisa de **dados próprios**, ela deixa de ser uma simples ligação e vira **uma entidade**.
+
+Exemplo: **Pedido ↔ Produto** é "muitos para muitos" (um pedido tem vários produtos, e um produto está em vários pedidos). Mas a ligação tem `quantidade` e `precoUnitario`. Então criamos o **`ItemPedido`**, que já vimos acima:
+
+```mermaid
+erDiagram
+    PEDIDOS ||--|{ ITENS_PEDIDO : "contém"
+    PRODUTOS ||--o{ ITENS_PEDIDO : "aparece em"
+    ITENS_PEDIDO {
+        bigint id PK
+        bigint pedido_id FK
+        bigint produto_id FK
+        int quantidade
+        decimal preco_unitario
+    }
+```
+
+| Situação | Solução |
+|---|---|
+| A ligação **só** relaciona os dois lados (usuário ↔ perfil) | `@ManyToMany` |
+| A ligação tem **dados próprios** (quantidade, data, preço, status) | **Entidade intermediária**: dois `@ManyToOne` + `@OneToMany` no pai |
+
+#### Cuidados
+
+| Cuidado | Explicação |
+|---|---|
+| **`cascade = REMOVE` ou `ALL`** | Apagar um usuário apagaria os **perfis**, que outros usuários também usam. Em `@ManyToMany`, nunca use cascade de remoção |
+| **`List` em vez de `Set`** | Mais comandos SQL a cada alteração |
+| **Coleção grande** | Não mapeie `@ManyToMany` com milhares de itens. Consulte pelo repository |
+| **`LazyInitializationException`** | Ao usar `perfis` fora da transação (como no Spring Security). Use `@EntityGraph` |
+| **Esquecer o `equals`/`hashCode`** | Um `Set` precisa deles para saber o que é "o mesmo perfil" (veja [`equals` e `hashCode`](#equals-e-hashcode-seguros-para-entidades)) |
+
+---
+
+### @OneToOne: um para um
+
+#### O que é
+
+**Um** registro se liga a **exatamente um** do outro lado. Um usuário tem **um** registro de dados pessoais (telefone, data de nascimento), e esse registro pertence a **um** único usuário.
+
+> Na prática, `@OneToOne` é **bem menos comum** do que as outras três.
+
+#### Quando faz sentido usar
+
+| Situação | Por quê |
+|---|---|
+| **Separar dados sensíveis ou protegidos** | Dados pessoais (CPF, telefone) em uma tabela separada, com acesso mais restrito (importante para a LGPD) |
+| **Separar colunas pesadas ou pouco usadas** | Foto, biografia longa: não pesam na consulta principal |
+| **Dados opcionais** | Nem todo usuário precisa ter esse registro |
+| **Reaproveitar uma tabela existente** | Ligar uma entidade nova a uma antiga |
+
+> [!TIP]
+> Se os dados **sempre** são carregados junto e não precisam de tabela própria, use **`@Embedded`** (como o `Endereco`): as colunas ficam na mesma tabela e não há `JOIN`.
+
+| | `@OneToOne` | `@Embedded` |
+|---|---|---|
+| Tabelas | **Duas** | **Uma** |
+| Tem `id` próprio | Sim (é uma entidade) | Não |
+| Carregamento | Pode ser `LAZY` | Sempre junto |
+| Indicado para | Dados opcionais, sensíveis ou pesados | Dados que sempre andam com o dono (endereço) |
+
+#### Forma 1: chave estrangeira com `unique`
+
+A tabela `dados_pessoais` tem sua própria chave primária e uma coluna `usuario_id` **única** (garante o "um para um"):
+
+```java
+@Entity
+@Table(name = "dados_pessoais")
+public class DadosPessoais {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @OneToOne(fetch = FetchType.LAZY, optional = false)           // um registro -> um usuário
+    @JoinColumn(name = "usuario_id", nullable = false, unique = true)   // UNIQUE: o mesmo usuário não aparece duas vezes
+    private Usuario usuario;
+
+    @Column(length = 20)
+    private String telefone;
+
+    private LocalDate dataNascimento;
+}
+```
+
+#### Forma 2 (recomendada): chave primária compartilhada com `@MapsId`
+
+Aqui o `id` de `dados_pessoais` **é o mesmo** `id` do usuário. Não existe coluna extra, e a ligação é garantida pela própria chave primária:
+
+```java
+@Entity
+@Table(name = "dados_pessoais")
+public class DadosPessoais {
+
+    @Id
+    private Long id;                                              // SEM @GeneratedValue: o valor vem do usuário
+
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @MapsId                                                       // "meu id é copiado do id do usuário"
+    @JoinColumn(name = "usuario_id")                              // esta coluna é, ao mesmo tempo, PK e FK
+    private Usuario usuario;
+
+    @Column(length = 20)
+    private String telefone;
+
+    private LocalDate dataNascimento;
+
+    protected DadosPessoais() { }
+
+    public DadosPessoais(Usuario usuario, String telefone, LocalDate dataNascimento) {
+        this.usuario = usuario;
+        this.telefone = telefone;
+        this.dataNascimento = dataNascimento;
+    }
+
+    void setUsuario(Usuario usuario) {                            // usado pelo lado inverso (Usuario) para sincronizar
+        this.usuario = usuario;
+    }
+}
+```
+
+```sql
+CREATE TABLE dados_pessoais (
+    usuario_id      BIGINT PRIMARY KEY REFERENCES usuarios (id),   -- ao mesmo tempo PK e FK
+    telefone        VARCHAR(20),
+    data_nascimento DATE
+);
+```
+
+| | Forma 1 (FK `unique`) | Forma 2 (`@MapsId`) |
+|---|---|---|
+| Colunas | `id` próprio **+** `usuario_id` | Só `usuario_id` (PK e FK) |
+| Buscar pelo id do usuário | Precisa de uma consulta pela coluna | `findById(usuarioId)` direto |
+| Complexidade | Simples de entender | Um pouco mais sutil |
+
+#### O lado inverso (opcional)
+
+Para navegar de `Usuario` até os dados pessoais:
+
+```java
+// dentro de Usuario
+@OneToOne(mappedBy = "usuario",                                   // "usuario" é o campo de DadosPessoais que é o DONO
+          cascade = CascadeType.ALL,                              // salvar/apagar o usuário faz o mesmo com os dados pessoais
+          orphanRemoval = true,                                   // se retirar os dados, o registro é apagado
+          fetch = FetchType.LAZY)
+private DadosPessoais dadosPessoais;
+
+public void setDadosPessoais(DadosPessoais dados) {               // sincroniza os dois lados
+    this.dadosPessoais = dados;
+    if (dados != null) dados.setUsuario(this);
+}
+```
+
+> [!WARNING]
+> No lado **inverso** (`mappedBy`) de um `@OneToOne`, o Hibernate precisa consultar o banco para saber se o registro **existe ou é `null`**. Por isso o `LAZY` **muitas vezes não funciona** ali, e a relação é carregada na hora. Se não precisar navegar de `Usuario` para `DadosPessoais`, **não mapeie o lado inverso**: busque pelo repository.
+
+#### Como usar
+
+```java
+@Transactional
+public void cadastrarDadosPessoais(Long usuarioId, DadosPessoaisRequest req) {
+    Usuario usuario = usuarioRepository.findById(usuarioId)
+            .orElseThrow(() -> new UsuarioNaoEncontradoException(usuarioId));
+
+    DadosPessoais dados = new DadosPessoais(usuario, req.telefone(), req.dataNascimento());
+    dadosPessoaisRepository.save(dados);          // INSERT em dados_pessoais com usuario_id = id do usuário
+}
+```
+
+```java
+public interface DadosPessoaisRepository extends JpaRepository<DadosPessoais, Long> {
+    // Com @MapsId, o id do registro é o id do usuário: findById(usuarioId) já resolve.
+}
+```
+
+#### Cuidados
+
+| Cuidado | Explicação |
+|---|---|
+| **EAGER por padrão** | Sempre declare `fetch = FetchType.LAZY` no lado dono |
+| **Esquecer o `unique`** (Forma 1) | Sem ele, o banco aceita **dois** registros para o mesmo usuário e quebra o "um para um" |
+| **Lado inverso e `LAZY`** | Pode ser carregado na hora mesmo assim (veja o aviso acima) |
+| **`cascade` no lado errado** | O `cascade` fica no lado do **pai** (`Usuario`), e não no `DadosPessoais` |
+| **Dados sensíveis** | Se separou por segurança, **não devolva** esses campos no DTO padrão do usuário |
+
+---
+
+### Resumo: as quatro relações lado a lado
+
+| | `@ManyToOne` | `@OneToMany` | `@ManyToMany` | `@OneToOne` |
+|---|---|---|---|---|
+| **Lê-se** | Muitos → um | Um → muitos | Muitos ↔ muitos | Um ↔ um |
+| **Exemplo** | Pedido → Usuario | Pedido → itens | Usuario ↔ Perfil | Usuario ↔ DadosPessoais |
+| **Onde fica a chave estrangeira** | Na tabela de **quem tem a anotação** | Na tabela dos **"muitos"** (o outro lado) | Em uma **tabela de ligação** | Na tabela do **lado dono** (ou chave primária compartilhada) |
+| **Lado dono** | **Sempre** ele | Nunca (usa `mappedBy`) | O que tem `@JoinTable` | O que tem `@JoinColumn` |
+| **Atributo que liga** | `@JoinColumn` | `mappedBy` | `@JoinTable` (e `mappedBy` no inverso) | `@JoinColumn` (e `mappedBy` no inverso) |
+| **`fetch` padrão** | **EAGER** (mude para `LAZY`) | `LAZY` | `LAZY` | **EAGER** (mude para `LAZY`) |
+| **Tipo do campo** | Objeto | `List` ou `Set` | **`Set`** | Objeto |
+| **`cascade` típico** | Nenhum | `ALL` + `orphanRemoval` (composição) | `PERSIST`/`MERGE` ou nenhum | `ALL` no lado do pai (se for composição) |
+| **Cuidado principal** | N+1 | Sincronizar os dois lados | `cascade REMOVE` e `List` | Lado inverso e `LAZY` |
 
 ---
 
