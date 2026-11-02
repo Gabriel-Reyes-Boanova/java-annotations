@@ -1,6 +1,4 @@
-import pypandoc
-
-markdown = r'''# 🗄️ Spring Security: autenticação com JDBC e banco de dados
+## Spring Security: autenticação com JDBC e banco de dados
 
 ![Java](https://img.shields.io/badge/Java-17%2B-orange?logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.x-6DB33F?logo=springboot&logoColor=white)
@@ -522,4 +520,3 @@ O `JdbcUserDetailsManager` busca o usuário e suas authorities. O Spring Securit
 - [Spring Security — Password Storage](https://docs.spring.io/spring-security/reference/features/authentication/password-storage.html)
 - [spring-projects/spring-security no GitHub](https://github.com/spring-projects/spring-security)
 '''
-
