@@ -12,18 +12,30 @@ Continuação do guia de configuração inicial do Spring Security. Aqui saímos
 
 ## 📑 Sumário
 
-- [Do InMemory para o banco](#-do-inmemory-para-o-banco)
-- [DataSource](#-datasource)
-- [UserDetailsManager](#-userdetailsmanager)
-- [JdbcUserDetailsManager](#-jdbcuserdetailsmanager)
-- [Default Spring Security Database Schema](#-default-spring-security-database-schema)
-- [SQL para PostgreSQL](#-sql-para-postgresql)
-- [Configuração do projeto](#-configuração-do-projeto)
-- [Código completo](#-código-completo)
-- [Gerenciando usuários](#-gerenciando-usuários)
-- [Fluxo de autenticação](#-fluxo-de-autenticação)
-- [JDBC x JPA](#-jdbc-x-jpa)
-- [Cuidados importantes](#-cuidados-importantes)
+- [Do InMemory para o banco](#do-inmemory-para-o-banco)
+- [DataSource](#datasource)
+- [UserDetailsManager](#userdetailsmanager)
+- [JdbcUserDetailsManager](#jdbcuserdetailsmanager)
+- [Default Spring Security Database Schema](#default-spring-security-database-schema)
+- [SQL para PostgreSQL](#sql-para-postgresql)
+- [Configuração do projeto](#configuração-do-projeto)
+- [Codificação de senha (PasswordEncoder)](#codificação-de-senha-passwordencoder)
+  - [Codificar, criptografar e fazer hash](#codificar-criptografar-e-fazer-hash)
+  - [Como o BCrypt guarda a senha](#como-o-bcrypt-guarda-a-senha)
+  - [A interface PasswordEncoder e seus métodos](#a-interface-passwordencoder-e-seus-métodos)
+  - [Quando usar cada método](#quando-usar-cada-método)
+  - [Implementações disponíveis](#implementações-disponíveis)
+  - [Qual formato gravar no banco](#qual-formato-gravar-no-banco)
+  - [Exemplos práticos](#exemplos-práticos)
+  - [Migrando de algoritmo](#migrando-de-algoritmo)
+  - [Erros comuns](#erros-comuns)
+  - [Testando o PasswordEncoder](#testando-o-passwordencoder)
+- [Código completo](#código-completo)
+- [Gerenciando usuários](#gerenciando-usuários)
+- [Fluxo de autenticação](#fluxo-de-autenticação)
+- [JDBC x JPA](#jdbc-x-jpa)
+- [Cuidados importantes](#cuidados-importantes)
+- [Indo para produção](#indo-para-produção)
 - [Referências](#-referências)
 
 ## Do InMemory para o banco
@@ -221,7 +233,7 @@ CREATE TABLE authorities (
 );
 ```
 
-**Por que `password` tem tamanho 500?** Para comportar o hash produzido pelo algoritmo de codificação de senha. Nunca armazene a senha original em texto puro.
+**Por que `password` tem tamanho 500?** Para comportar o hash produzido pelo algoritmo de codificação de senha. Nunca armazene a senha original em texto puro. Um hash BCrypt tem 60 caracteres (68 com o prefixo `{bcrypt}`), e outros algoritmos geram hashes maiores. Veja [Codificação de senha](#codificação-de-senha-passwordencoder).
 
 **Por que existe uma chave estrangeira?** Para impedir que uma authority seja associada a um username inexistente.
 
@@ -244,7 +256,7 @@ VALUES
 ```
 
 > [!WARNING]
-> O hash acima é ilustrativo. Gere o valor com `PasswordEncoder.encode()` na aplicação. Não copie esse texto como se fosse uma senha BCrypt válida.
+> O hash acima é ilustrativo. Gere o valor com `PasswordEncoder.encode()` na aplicação (veja [Como gerar um hash para colocar no SQL](#como-gerar-um-hash-para-colocar-no-sql)). Não copie esse texto como se fosse uma senha BCrypt válida.
 
 ## Configuração do projeto
 
@@ -303,6 +315,449 @@ Coloque o SQL de criação de `users` e `authorities` nesse arquivo. Adicione a 
 
 Outra opção é utilizar `schema.sql` com a inicialização SQL do Spring Boot. Evite manter duas ferramentas tentando criar as mesmas tabelas.
 
+## Codificação de senha (PasswordEncoder)
+
+Toda senha guardada no banco precisa estar **codificada**. No Spring Security, quem faz isso é a interface **`PasswordEncoder`**. Sem ela, a coluna `users.password` guardaria a senha original, e qualquer vazamento do banco expõe todas as contas (e as pessoas costumam reaproveitar a mesma senha em outros sites).
+
+```mermaid
+flowchart LR
+    A["Senha digitada<br/>Senha@123"] -->|"encode()"| B["Hash guardado no banco<br/>$2a$10$N9qo8..."]
+    C["Senha digitada no login"] -->|"matches(senha, hash)"| D{"Confere com o hash?"}
+    B --> D
+    D -->|Sim| E["Acesso permitido"]
+    D -->|Não| F["Acesso negado"]
+```
+
+### Codificar, criptografar e fazer hash
+
+O nome `PasswordEncoder` ("codificador") pode confundir. Na prática, ele faz **hash**:
+
+| Técnica | Reversível? | Para que serve | Serve para senhas? |
+|---|---|---|---|
+| **Codificação** (ex.: Base64) | Sim, por qualquer pessoa | Mudar o formato dos dados | ❌ **Não**. Não protege nada |
+| **Criptografia** (ex.: AES) | Sim, **com a chave** | Proteger dados que você precisa **ler de volta** (um documento, um token) | ❌ Não. Quem roubar a chave lê todas as senhas |
+| **Hash simples** (ex.: MD5, SHA-256) | Não | Verificar integridade de arquivos | ❌ Não. É rápido demais e permite ataques de força bruta |
+| **Hash de senha** (BCrypt, Argon2, PBKDF2, SCrypt) | **Não** | **Guardar senhas** | ✅ **Sim** |
+
+O que torna esses algoritmos adequados para senhas:
+
+| Característica | O que significa |
+|---|---|
+| **Sem volta** (*one-way*) | Não existe "descriptografar". A aplicação nunca sabe a senha original: ela só confere se a senha digitada gera o mesmo hash |
+| **Salt aleatório** | Um valor aleatório, **diferente para cada senha**, misturado antes do hash. Duas pessoas com a mesma senha têm hashes diferentes, e tabelas pré-calculadas (*rainbow tables*) deixam de funcionar |
+| **Lento de propósito** (*work factor*) | O custo é ajustável. Para você, calcular um hash por login é imperceptível. Para um atacante testando bilhões de palpites, é inviável |
+
+### Como o BCrypt guarda a senha
+
+O resultado do BCrypt é um texto de **60 caracteres**, que já carrega **tudo** o que é preciso para conferir a senha depois (versão, custo e salt). Por isso não existe uma coluna separada para o salt.
+
+```text
+$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+└┬─┘└┬┘└─────────┬──────────┘└──────────────┬──────────────┘
+ │   │           │                          │
+ │   │           │                          └─ hash (31 caracteres)
+ │   │           └─ salt aleatório (22 caracteres)
+ │   └─ custo (strength): 2^10 = 1.024 rodadas
+ └─ versão do algoritmo
+```
+
+| Parte | Exemplo | Significado |
+|---|---|---|
+| Versão | `$2a$` | Versão do BCrypt |
+| Custo | `10` | Fator de trabalho (padrão do Spring). **Cada +1 dobra o tempo** de cálculo |
+| Salt | `N9qo8uLOickgx2ZMRZoMye` | 22 caracteres aleatórios, gerados a cada `encode()` |
+| Hash | `IjZAgcfl7p92...` | O resultado do cálculo (31 caracteres) |
+
+> [!NOTE]
+> O hash do exemplo é apenas ilustrativo. Cada chamada de `encode()` gera um valor diferente.
+
+### A interface PasswordEncoder e seus métodos
+
+```java
+public interface PasswordEncoder {
+
+    String encode(CharSequence rawPassword);
+
+    boolean matches(CharSequence rawPassword, String encodedPassword);
+
+    default boolean upgradeEncoding(String encodedPassword) {
+        return false;
+    }
+}
+```
+
+| Método | O que recebe | O que devolve | O que faz |
+|---|---|---|---|
+| **`encode(rawPassword)`** | A senha **em texto puro** | O **hash** (`String`) | Gera o hash com um salt novo. **Cada chamada devolve um resultado diferente**, mesmo para a mesma senha |
+| **`matches(rawPassword, encodedPassword)`** | A senha digitada **e** o hash guardado | `true` ou `false` | Extrai o salt e o custo do hash guardado, calcula o hash da senha digitada e compara. **É a única forma correta de comparar** |
+| **`upgradeEncoding(encodedPassword)`** | O hash guardado | `true` ou `false` | Diz se o hash está **desatualizado** (custo menor que o atual, ou algoritmo antigo) e deveria ser refeito. O padrão é `false` |
+
+```java
+PasswordEncoder encoder = new BCryptPasswordEncoder();
+
+String hash1 = encoder.encode("Senha@123");     // ex.: $2a$10$N9qo8uLOickgx2ZMRZoMyeIj...
+String hash2 = encoder.encode("Senha@123");     // OUTRO valor (salt diferente), mesma senha
+
+encoder.matches("Senha@123", hash1);            // true
+encoder.matches("Senha@123", hash2);            // true  (os dois hashes são válidos para a mesma senha)
+encoder.matches("senha@123", hash1);            // false (maiúsculas e minúsculas contam)
+
+boolean desatualizado = new BCryptPasswordEncoder(12).upgradeEncoding(hash1);
+                                                // true: hash1 foi feito com custo 10 e o encoder atual usa 12
+```
+
+> [!IMPORTANT]
+> **Nunca compare com `equals`.** `encoder.encode(senhaDigitada).equals(hashGuardado)` é **sempre `false`**, porque cada `encode()` usa um salt novo. Use sempre `matches(...)`.
+
+### Quando usar cada método
+
+#### `encode()`: sempre que uma senha **vai ser gravada**
+
+| Situação | Exemplo |
+|---|---|
+| **Cadastro** de usuário | `createUser(...)` com `passwordEncoder.encode(senha)` |
+| **Troca de senha** | Antes de gravar a nova senha |
+| **Redefinição** ("esqueci a senha") | Depois de validar o token enviado por e-mail |
+| **Criar o primeiro administrador** | Um *seed* na inicialização da aplicação |
+| **Migração de dados** | Ao importar usuários de um sistema que guardava senhas em texto puro |
+
+#### `matches()`: sempre que uma senha **precisa ser conferida**
+
+| Situação | Quem chama |
+|---|---|
+| **Login** | **O Spring Security**, sozinho (`DaoAuthenticationProvider`). Você **não** precisa chamar |
+| **Trocar a senha** (pedir a senha atual antes) | **Você** |
+| **Operação sensível** (excluir conta, mudar e-mail) com confirmação de senha | **Você** |
+
+#### `upgradeEncoding()`: para manter os hashes sempre atualizados
+
+Chamado **depois de um login bem-sucedido**, quando você ainda tem a senha original em mãos. Se devolver `true`, o hash é refeito com a configuração atual e gravado de novo. O Spring faz isso automaticamente se existir um bean `UserDetailsPasswordService` (veja [Migrando de algoritmo](#migrando-de-algoritmo)).
+
+#### Resumo
+
+```mermaid
+sequenceDiagram
+    participant U as Usuário
+    participant A as Sua aplicação
+    participant P as PasswordEncoder
+    participant B as Banco
+
+    Note over U,B: CADASTRO (você chama encode)
+    U->>A: username + senha
+    A->>P: encode(senha)
+    P-->>A: hash
+    A->>B: INSERT users (username, hash)
+
+    Note over U,B: LOGIN (o Spring chama matches)
+    U->>A: username + senha
+    A->>B: busca o hash do username
+    B-->>A: hash
+    A->>P: matches(senha, hash)
+    P-->>A: true ou false
+```
+
+| Método | Você chama? | O Spring chama? |
+|---|---|---|
+| `encode` | ✅ Cadastro, troca e redefinição de senha | Não. Só indiretamente, se você usar `.passwordEncoder(...)` no `User.builder()` |
+| `matches` | ✅ Confirmação de senha em operações sensíveis | ✅ **No login** |
+| `upgradeEncoding` | Raramente | ✅ Após o login, se houver `UserDetailsPasswordService` |
+
+### Implementações disponíveis
+
+Todas ficam no pacote `org.springframework.security.crypto...` e implementam `PasswordEncoder`.
+
+| Implementação | Algoritmo | Observações |
+|---|---|---|
+| **`BCryptPasswordEncoder`** | BCrypt | ✅ **O mais usado.** Simples, sem dependências extras. Custo padrão `10` |
+| `Argon2PasswordEncoder` | Argon2 | Moderno, consome memória (mais resistente a hardware especializado). Exige a biblioteca **Bouncy Castle** |
+| `Pbkdf2PasswordEncoder` | PBKDF2 | Aceito em ambientes que exigem conformidade com **FIPS**. Mais fraco que BCrypt contra hardware especializado |
+| `SCryptPasswordEncoder` | SCrypt | Consome memória. Exige **Bouncy Castle** |
+| **`DelegatingPasswordEncoder`** | Vários, escolhidos por um **prefixo** | ✅ Permite **trocar de algoritmo** sem invalidar as senhas antigas. Veja abaixo |
+| `NoOpPasswordEncoder` (`{noop}`) | Nenhum (texto puro) | ❌ **Só para testes e estudo.** Obsoleto |
+| `StandardPasswordEncoder`, `MessageDigestPasswordEncoder` | SHA-256, MD5... | ❌ **Legados e inseguros.** Não use |
+
+#### BCryptPasswordEncoder
+
+```java
+PasswordEncoder encoder = new BCryptPasswordEncoder();      // custo padrão: 10
+PasswordEncoder forte   = new BCryptPasswordEncoder(12);    // custo 12: cerca de 4 vezes mais lento que o 10
+```
+
+| Custo (`strength`) | Rodadas | Tempo relativo |
+|---|---|---|
+| 10 (padrão) | 2¹⁰ = 1.024 | 1× |
+| 11 | 2¹¹ | 2× |
+| 12 | 2¹² | 4× |
+| 14 | 2¹⁴ | 16× |
+
+> [!TIP]
+> O custo é um equilíbrio: alto o bastante para frear ataques e baixo o bastante para não pesar no login. A própria documentação do Spring Security recomenda **ajustar o custo ao seu servidor**, de forma que verificar uma senha leve um tempo perceptível (da ordem de algumas centenas de milissegundos). Meça no seu ambiente e lembre que o custo vale para **cada** tentativa de login.
+
+> [!WARNING]
+> O BCrypt considera só os **primeiros 72 bytes** da senha. Limite o tamanho máximo da senha na validação do cadastro (por exemplo, 64 caracteres) para não gerar surpresas.
+
+#### Argon2, PBKDF2 e SCrypt
+
+```java
+PasswordEncoder argon2 = Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8();
+PasswordEncoder pbkdf2 = Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8();
+PasswordEncoder scrypt = SCryptPasswordEncoder.defaultsForSpringSecurity_v5_8();
+```
+
+> [!NOTE]
+> O Argon2 e o SCrypt do Spring usam a biblioteca Bouncy Castle (`org.bouncycastle:bcpkix-jdk18on`), que precisa estar no projeto. Os métodos `defaultsForSpringSecurity_...` trazem parâmetros recomendados, mas os nomes podem variar entre versões: confira a documentação da versão que você usa.
+
+#### DelegatingPasswordEncoder: o hash carrega o nome do algoritmo
+
+```java
+PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
+
+String hash = encoder.encode("Senha@123");
+// {bcrypt}$2a$10$N9qo8uLOickgx2ZMRZoMyeIj...
+//  └─┬──┘
+//    └─ prefixo: diz qual algoritmo gerou este hash
+```
+
+| Prefixo no banco | Algoritmo usado para conferir |
+|---|---|
+| `{bcrypt}` | BCrypt (padrão para **novas** senhas) |
+| `{argon2}` | Argon2 |
+| `{pbkdf2}` | PBKDF2 |
+| `{scrypt}` | SCrypt |
+| `{noop}` | Texto puro (somente testes) |
+
+O `matches()` lê o prefixo, escolhe o algoritmo certo e confere. Assim, o banco pode ter senhas de algoritmos diferentes ao mesmo tempo, e você troca o algoritmo padrão sem forçar ninguém a redefinir a senha.
+
+### Qual formato gravar no banco
+
+O formato guardado em `users.password` **precisa ser compatível com o `PasswordEncoder` do seu `@Bean`**. Esta é a causa mais comum de "a senha está certa, mas o login não funciona".
+
+| Seu bean | O que gravar em `users.password` | Exemplo |
+|---|---|---|
+| `new BCryptPasswordEncoder()` (como no [Código completo](#código-completo)) | **Só o hash**, sem prefixo | `$2a$10$N9qo8...` |
+| `PasswordEncoderFactories.createDelegatingPasswordEncoder()` | O hash **com** prefixo | `{bcrypt}$2a$10$N9qo8...` |
+
+| Combinação errada | O que acontece |
+|---|---|
+| Bean `BCryptPasswordEncoder` + hash com `{bcrypt}` | O BCrypt não reconhece o formato, registra um aviso (*Encoded password does not look like BCrypt*) e **o login falha** |
+| Bean `Delegating` + hash **sem** prefixo | `IllegalArgumentException: There is no PasswordEncoder mapped for the id "null"` |
+
+> [!TIP]
+> Se você já tem hashes sem prefixo e quer usar o `DelegatingPasswordEncoder`, configure o algoritmo padrão para hashes sem prefixo:
+>
+> ```java
+> DelegatingPasswordEncoder encoder =
+>         (DelegatingPasswordEncoder) PasswordEncoderFactories.createDelegatingPasswordEncoder();
+> encoder.setDefaultPasswordEncoderForMatches(new BCryptPasswordEncoder());
+> ```
+
+### Exemplos práticos
+
+#### 1. Cadastro (`encode`)
+
+Já usado em [Gerenciando usuários](#gerenciando-usuários). A senha original **nunca** é gravada:
+
+```java
+UserDetails usuario = User.builder()
+        .username(username)
+        .password(passwordEncoder.encode(senha))     // codifica ANTES de criar o usuário
+        .roles("USER")
+        .build();
+
+userDetailsManager.createUser(usuario);
+```
+
+Alternativa, deixando o `User.builder()` aplicar o codificador:
+
+```java
+UserDetails usuario = User.builder()
+        .username(username)
+        .passwordEncoder(passwordEncoder::encode)    // o builder chama encode() ao montar
+        .password(senha)                             // aqui vai a senha em TEXTO PURO
+        .roles("USER")
+        .build();
+```
+
+> [!WARNING]
+> Use **uma** das duas formas, nunca as duas ao mesmo tempo. Combinar `.password(passwordEncoder.encode(senha))` com `.passwordEncoder(passwordEncoder::encode)` codifica **duas vezes**, e o login nunca mais funciona.
+
+#### 2. Troca de senha (`matches` + `encode`)
+
+```java
+public void alterarSenha(String senhaAtual, String novaSenha) {
+
+    // O usuário vem da AUTENTICAÇÃO, e não do corpo da requisição
+    String username = SecurityContextHolder.getContext().getAuthentication().getName();
+
+    UserDetails usuario = userDetailsManager.loadUserByUsername(username);
+
+    // 1) confere a senha atual com matches()
+    if (!passwordEncoder.matches(senhaAtual, usuario.getPassword())) {
+        throw new IllegalArgumentException("Senha atual incorreta");
+    }
+
+    // 2) codifica a nova senha com encode() e grava
+    UserDetails atualizado = User.withUserDetails(usuario)
+            .password(passwordEncoder.encode(novaSenha))
+            .build();
+
+    userDetailsManager.updateUser(atualizado);
+}
+```
+
+> [!IMPORTANT]
+> Pegue o `username` de quem está **autenticado**. Se ele vier do corpo da requisição, qualquer usuário consegue trocar a senha de outro.
+
+#### 3. Criar o administrador inicial (`encode`)
+
+```java
+@Bean
+@Profile("dev")                                                   // só em desenvolvimento
+CommandLineRunner criarAdmin(UserDetailsManager manager,
+                             PasswordEncoder encoder,
+                             @Value("${ADMIN_PASSWORD}") String senha) {   // a senha vem do ambiente, e não do código
+
+    return args -> {
+        if (!manager.userExists("admin")) {
+            manager.createUser(User.builder()
+                    .username("admin")
+                    .password(encoder.encode(senha))
+                    .roles("ADMIN")
+                    .build());
+        }
+    };
+}
+```
+
+#### Como gerar um hash para colocar no SQL
+
+Para as inserções de teste (ou uma migration do Flyway), você precisa de um hash **real**. Gere-o com uma classe temporária:
+
+```java
+public class GeradorDeHash {
+    public static void main(String[] args) {
+        System.out.println(new BCryptPasswordEncoder().encode("Senha@123"));
+    }
+}
+```
+
+Cole o valor impresso na coluna `password`. Lembre-se do [formato correto](#qual-formato-gravar-no-banco) para o seu bean.
+
+> [!WARNING]
+> Não faça migrations com senhas reais de produção. Para usuários de verdade, o cadastro deve passar pela aplicação, que chama `encode()`.
+
+### Migrando de algoritmo
+
+Com o tempo, o custo ideal sobe e algoritmos novos surgem. O `DelegatingPasswordEncoder` permite migrar **sem pedir que todos redefinam a senha**:
+
+```java
+@Bean
+public PasswordEncoder passwordEncoder() {
+    String idPadrao = "bcrypt";                                   // usado para NOVAS senhas
+
+    Map<String, PasswordEncoder> encoders = new HashMap<>();
+    encoders.put("bcrypt", new BCryptPasswordEncoder(12));        // novas senhas: custo 12
+    encoders.put("argon2", Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8());
+    encoders.put("noop", NoOpPasswordEncoder.getInstance());      // SÓ se ainda existirem senhas {noop} de teste. Remova em produção
+
+    return new DelegatingPasswordEncoder(idPadrao, encoders);
+}
+```
+
+Como a atualização acontece:
+
+1. O usuário faz login. O Spring chama `matches()` (usando o algoritmo indicado pelo prefixo do hash guardado).
+2. Se der certo, o Spring chama `upgradeEncoding()` no hash guardado.
+3. Se devolver `true` (custo antigo ou algoritmo diferente do padrão), o Spring chama `updatePassword(...)` de um bean **`UserDetailsPasswordService`**, que grava o hash novo.
+
+```java
+@Service
+public class SenhaUpgradeService implements UserDetailsPasswordService {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public SenhaUpgradeService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @Override
+    public UserDetails updatePassword(UserDetails user, String novoHash) {
+        jdbcTemplate.update("UPDATE users SET password = ? WHERE username = ?",
+                novoHash, user.getUsername());
+        return User.withUserDetails(user).password(novoHash).build();
+    }
+}
+```
+
+> [!NOTE]
+> Esse upgrade é feito **no login**, porque só nesse momento a aplicação conhece a senha em texto puro (o hash antigo não pode ser convertido para outro). Quem nunca mais fizer login continua com o hash antigo.
+
+### Erros comuns
+
+| Problema | Sintoma | Solução |
+|---|---|---|
+| **Guardar a senha em texto puro** | Vazamento expõe todas as contas | Sempre `encode()` antes de gravar |
+| **Codificar duas vezes** | O login sempre falha | Codifique **uma** vez (veja o [exemplo 1](#1-cadastro-encode)) |
+| **Comparar com `equals`** | A comparação é sempre `false` | Use `matches()` |
+| **Hash sem prefixo com `DelegatingPasswordEncoder`** | `There is no PasswordEncoder mapped for the id "null"` | Grave o prefixo `{bcrypt}` ou use `setDefaultPasswordEncoderForMatches` |
+| **Hash com prefixo e `BCryptPasswordEncoder` direto** | Aviso *does not look like BCrypt* e login negado | Tire o prefixo, ou use o `DelegatingPasswordEncoder` |
+| **Coluna `password` pequena** | Erro de tamanho ou hash cortado | `VARCHAR(255)` ou mais (o schema deste guia usa 500) |
+| **`{noop}` ou `NoOpPasswordEncoder` em produção** | Senhas em texto puro | Use BCrypt, Argon2... |
+| **Trocar o algoritmo sem planejamento** | Usuários antigos não conseguem logar | `DelegatingPasswordEncoder` + `upgradeEncoding` |
+| **Usar SHA-256 ou MD5 "feito à mão"** | Hash rápido demais, vulnerável a força bruta | Use um algoritmo de hash de senha |
+| **Senha maior que 72 bytes no BCrypt** | O que passa do limite é ignorado | Limite o tamanho da senha na validação |
+| **Registrar a senha ou o hash em logs** | Vazamento pelos logs | Nunca imprima senhas, hashes ou o corpo de requisições de login |
+| **Criar `PasswordEncoder` com `new` em cada método** | Código repetido e configurações diferentes | Declare **um** `@Bean` e injete |
+
+#### O que NÃO codificar com `PasswordEncoder`
+
+| Dado | Por quê | O que fazer |
+|---|---|---|
+| **Dados que você precisa ler de volta** (CPF, documentos) | Hash não tem volta | Criptografia (AES) ou guardar sem codificar, com controle de acesso |
+| **JWT, chave de assinatura, segredo da aplicação** | Não são senhas | Variáveis de ambiente |
+| **Tokens e chaves de API de alta entropia** | Já são aleatórios e longos, e um algoritmo lento não é necessário | Guarde um hash simples (SHA-256) |
+| **E-mail e `username`** | Você consulta por eles | Guarde como texto |
+
+#### Além do hash: regras para boas senhas
+
+- Defina um **tamanho mínimo** (por exemplo, 8 a 12 caracteres) e **máximo** (por causa do limite de 72 bytes do BCrypt).
+- Prefira senhas longas a regras complicadas de caracteres.
+- Considere recusar senhas **vazadas ou muito comuns**. Versões recentes do Spring Security oferecem o `CompromisedPasswordChecker` para consultar bases de senhas vazadas (confira a documentação da versão que você usa).
+- Bloqueie ou atrase tentativas repetidas de login (*rate limiting*).
+
+### Testando o PasswordEncoder
+
+```java
+class PasswordEncoderTest {
+
+    private final PasswordEncoder encoder = new BCryptPasswordEncoder();
+
+    @Test
+    void deveGerarHashDiferenteACadaChamada() {
+        String hash1 = encoder.encode("Senha@123");
+        String hash2 = encoder.encode("Senha@123");
+
+        assertNotEquals(hash1, hash2);                       // salts diferentes
+    }
+
+    @Test
+    void deveConferirASenhaCorreta() {
+        String hash = encoder.encode("Senha@123");
+
+        assertTrue(encoder.matches("Senha@123", hash));
+        assertFalse(encoder.matches("OutraSenha", hash));
+    }
+
+    @Test
+    void naoDeveGuardarASenhaEmTextoPuro() {
+        String hash = encoder.encode("Senha@123");
+
+        assertFalse(hash.contains("Senha@123"));
+        assertEquals(60, hash.length());                     // BCrypt: sempre 60 caracteres
+    }
+}
+```
+
 ## Código completo
 
 Exemplo de configuração com `JdbcUserDetailsManager` e BCrypt.
@@ -359,6 +814,9 @@ O Spring injeta o `DataSource` configurado pelo Spring Boot no `JdbcUserDetailsM
 
 > [!IMPORTANT]
 > O `JdbcUserDetailsManager` utiliza as consultas e o schema JDBC esperados pelo Spring Security. Se você mudar nomes de tabelas ou colunas, precisará adaptar as consultas do manager.
+
+> [!NOTE]
+> Com o `BCryptPasswordEncoder` acima, os hashes em `users.password` devem estar **sem prefixo** (`$2a$10$...`). Se você trocar para o `DelegatingPasswordEncoder`, passe a gravar `{bcrypt}$2a$10$...`. Veja [Qual formato gravar no banco](#qual-formato-gravar-no-banco).
 
 ## Gerenciando usuários
 
@@ -433,7 +891,7 @@ userDetailsManager.changePassword(
 ```
 
 > [!NOTE]
-> `changePassword` foi pensado para a alteração da senha do usuário autenticado no contexto de segurança. Para um fluxo administrativo de redefinição de senha, implemente a verificação de autorização e a atualização de forma apropriada.
+> `changePassword` foi pensado para a alteração da senha do usuário autenticado no contexto de segurança. Para um fluxo administrativo de redefinição de senha, implemente a verificação de autorização e a atualização de forma apropriada. Observe que a nova senha deve ser passada **já codificada** (`passwordEncoder.encode(novaSenha)`). Para um exemplo completo de troca de senha, veja [Troca de senha](#2-troca-de-senha-matches--encode).
 
 ## Fluxo de autenticação
 
@@ -486,10 +944,18 @@ O `JdbcUserDetailsManager` busca o usuário e suas authorities. O Spring Securit
 > [!TIP]
 > Em um sistema maior, com entidades próprias e regras de negócio, JPA costuma oferecer mais flexibilidade. `JdbcUserDetailsManager` é excelente para entender a integração do Spring Security com banco relacional.
 
+> [!NOTE]
+> O `PasswordEncoder` funciona **da mesma forma** nos dois modelos: em JDBC ou em JPA, você chama `encode()` ao gravar e o Spring chama `matches()` no login.
+
 ## Cuidados importantes
 
 - [ ] Não armazene senhas em texto puro.
 - [ ] Utilize `BCryptPasswordEncoder` ou outro algoritmo apropriado de hash de senha.
+- [ ] Compare senhas **somente** com `matches()`, nunca com `equals`.
+- [ ] Codifique a senha **uma única vez** (cuidado com `encode()` duplicado).
+- [ ] Confira se o formato do hash no banco (com ou sem prefixo) combina com o seu `PasswordEncoder`.
+- [ ] Limite o tamanho máximo da senha (o BCrypt considera só os 72 primeiros bytes).
+- [ ] Nunca registre senhas ou hashes em logs.
 - [ ] Não versione credenciais do banco.
 - [ ] Crie as tabelas com Flyway ou outra ferramenta de migração.
 - [ ] Garanta que cada usuário tenha authorities válidas.
@@ -505,7 +971,9 @@ O `JdbcUserDetailsManager` busca o usuário e suas authorities. O Spring Securit
 - [x] Entender `DataSource`.
 - [x] Conhecer `JdbcUserDetailsManager`.
 - [x] Entender o schema JDBC padrão (`users` e `authorities`).
+- [x] Entender a codificação de senha (`PasswordEncoder`: `encode`, `matches` e `upgradeEncoding`).
 - [ ] Criar um cadastro com validação e tratamento de erros.
+- [ ] Planejar a migração de algoritmo com `DelegatingPasswordEncoder`.
 - [ ] Implementar autenticação com JPA e modelo de usuário próprio.
 - [ ] Estudar autenticação stateless com JWT.
 - [ ] Estudar refresh token, expiração e revogação de tokens.
@@ -516,7 +984,8 @@ O `JdbcUserDetailsManager` busca o usuário e suas authorities. O Spring Securit
 - [Spring Security — JDBC Authentication](https://docs.spring.io/spring-security/reference/servlet/authentication/passwords/jdbc.html)
 - [Spring Security — UserDetailsManager API](https://docs.spring.io/spring-security/site/docs/current/api/org/springframework/security/provisioning/UserDetailsManager.html)
 - [Spring Security — JdbcUserDetailsManager API](https://docs.spring.io/spring-security/site/docs/current/api/org/springframework/security/provisioning/JdbcUserDetailsManager.html)
+- [Spring Security — PasswordEncoder API](https://docs.spring.io/spring-security/site/docs/current/api/org/springframework/security/crypto/password/PasswordEncoder.html)
 - [Spring Boot — SQL Databases](https://docs.spring.io/spring-boot/reference/data/sql.html)
 - [Spring Security — Password Storage](https://docs.spring.io/spring-security/reference/features/authentication/password-storage.html)
+- [OWASP — Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
 - [spring-projects/spring-security no GitHub](https://github.com/spring-projects/spring-security)
-'''
