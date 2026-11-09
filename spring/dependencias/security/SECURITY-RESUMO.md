@@ -1,8 +1,4 @@
-import pypandoc
-
-markdown = r'''<div align="center">
-
-# 🔐 Spring Security — Guia de Fundamentos
+# 🔐 Spring Security — Guia de Fundamento
 
 **Anotações de estudo para Java e Spring Boot**
 
@@ -385,13 +381,3 @@ Uma sequência de estudo recomendada:
 ---
 
 '''
-
-output_path = "/mnt/data/spring-security-fundamentos.md"
-pypandoc.convert_text(
-    markdown,
-    "md",
-    format="md",
-    outputfile=output_path,
-    extra_args=["--standalone"]
-)
-print(f"Arquivo criado: {output_path}")
